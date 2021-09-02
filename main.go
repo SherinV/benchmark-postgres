@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	TOTAL_CLUSTERS = 5 // Number of SNO clusters to simulate.
-	PRINT_RESULTS  = true
-	SINGLE_TABLE   = true // Store relationships in single table or separate table.
-	UPDATE_TOTAL   = 1000 // Number of records to update.
-	DELETE_TOTAL   = 1000 // Number of records to delete.
+	TOTAL_CLUSTERS   = 5 // Number of SNO clusters to simulate.
+	PRINT_RESULTS    = true
+	SINGLE_TABLE     = true // Store relationships in single table or separate table.
+	UPDATE_TOTAL     = 1000 // Number of records to update.
+	DELETE_TOTAL     = 1000 // Number of records to delete.
+	CLUSTER_SHARDING = false
 )
 
 var lastUID string
@@ -33,8 +34,18 @@ func main() {
 	// Initialize the database tables.
 	var edgeStmt *sql.Stmt
 	if SINGLE_TABLE {
-		database.Exec(context.Background(), "DROP TABLE resources")
-		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, relatedto JSONB)")
+
+		if CLUSTER_SHARDING {
+			for i := 0; i < TOTAL_CLUSTERS; i++ {
+				clusterName := fmt.Sprintf("cluster%d", i)
+				database.Exec(context.Background(), "DROP TABLE resources")
+				database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS '%s' (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, relatedto JSONB)", clusterName)
+			}
+		} else { // this is case where single table but not cluster sharding
+			database.Exec(context.Background(), "DROP TABLE resources")
+			database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, relatedto JSONB)")
+
+		}
 	} else {
 		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, data TEXT)")
 		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS relationships (sourceId TEXT, destId TEXT)")
@@ -51,13 +62,19 @@ func main() {
 	// LESSON: When using BEGIN and COMMIT TRANSACTION saving to a file is comparable to in memory.
 	for i := 0; i < TOTAL_CLUSTERS; i++ {
 		// database.Exec("BEGIN TRANSACTION")
-		insert(addNodes, database, fmt.Sprintf("cluster-%d", i))
-		if !SINGLE_TABLE {
-			insertEdges(addEdges, edgeStmt, fmt.Sprintf("cluster-%d", i))
-		}
-		// database.Exec("COMMIT TRANSACTION")
-	}
+		if CLUSTER_SHARDING {
+			clusterName := fmt.Sprintf("cluster%d", i)
+			insert(addNodes, database, clusterName)
 
+			// database.Exec("BEGIN TRANSACTION")
+		} else {
+			insert(addNodes, database, fmt.Sprintf("cluster-%d", i))
+			if !SINGLE_TABLE {
+				insertEdges(addEdges, edgeStmt, fmt.Sprintf("cluster-%d", i))
+			}
+			// database.Exec("COMMIT TRANSACTION")
+		}
+	}
 	// WORKAROUND to flush the insert channel.
 	close(dbclient.InsertChan)
 	time.Sleep(1 * time.Second)
