@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 
 	pgxpool "github.com/jackc/pgx/v4/pgxpool"
 )
@@ -21,6 +20,8 @@ type Record struct {
 	Cluster    string
 	Name       string
 	Properties map[string]interface{}
+	EdgesTo    string
+	EdgesFrom  string
 }
 
 func init() {
@@ -45,7 +46,9 @@ func createPool() {
 	}
 
 	database_url := fmt.Sprintf("postgresql://%s:%s@%s:%d/%s", DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME)
-	fmt.Println("Connecting to PostgreSQL at: ", strings.ReplaceAll(database_url, DB_PASSWORD, "*****"))
+	//database_url := "postgresql://hippo:VR%3FG7Jrdz%29OjJki%28%5Dl0.FAR%7B@localhost:5432/hippo"
+
+	fmt.Println("Connecting to PostgreSQL at: ", database_url)
 	config, connerr := pgxpool.ParseConfig(database_url)
 	if connerr != nil {
 		fmt.Println("Error connecting to DB:", connerr)

@@ -6,16 +6,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"strings"
 	"time"
 
+	pgx "github.com/jackc/pgx/v4"
 	pgxpool "github.com/jackc/pgx/v4/pgxpool"
 	"github.com/jlpadilla/benchmark-postgres/pkg/dbclient"
 )
 
 const (
-	TOTAL_CLUSTERS = 5 // Number of SNO clusters to simulate.
+	TOTAL_CLUSTERS = 100 // Number of SNO clusters to simulate.
 	PRINT_RESULTS  = true
 	SINGLE_TABLE   = true // Store relationships in single table or separate table.
 	UPDATE_TOTAL   = 1000 // Number of records to update.
@@ -23,18 +25,19 @@ const (
 )
 
 var lastUID string
+var database *pgxpool.Pool
 
 func main() {
 	fmt.Printf("Loading %d clusters from template data.\n\n", TOTAL_CLUSTERS)
 
 	// Open the PostgreSQL database.
-	database := dbclient.GetConnection()
+	database = dbclient.GetConnection()
 
 	// Initialize the database tables.
 	var edgeStmt *sql.Stmt
 	if SINGLE_TABLE {
 		database.Exec(context.Background(), "DROP TABLE resources")
-		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, relatedto JSONB)")
+		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT,edgesFrom TEXT)")
 	} else {
 		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, data TEXT)")
 		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS relationships (sourceId TEXT, destId TEXT)")
@@ -63,6 +66,19 @@ func main() {
 	time.Sleep(1 * time.Second)
 
 	fmt.Println("\nInsert took", time.Since(start))
+
+	savedQueries := []string{"SELECT uid from resources where data->>'kind' IN ('Daemonset', 'Deployment','Job', 'Statefulset', 'ReplicaSet') LIMIT 10 ", "SELECT uid from resources where data->>'kind' IN ('Daemonset', 'Deployment','Job', 'Statefulset', 'ReplicaSet')  "}
+
+	relTestDescriptions := []string{"Related counts for EndpointSlice uid ", "Related counts for Connected Pod uid ", "Related counts for standalone Pod uid", "Related counts for 2 pods", "Related counts for Node uid", "Saved searches: 10 Workloads", "Saved searches: All Workloads"}
+	relTestUIDs := [][]string{[]string{"cluster-0/700fd168-5431-4018-91cd-49bc43fe2f83"}, []string{"cluster-0/7bb2b2b2-bb21-4a73-8a90-6f81cf6a9884"}, []string{"cluster-0/0a062e8c-f388-4cbe-a335-6846d4052eb4"}, []string{"cluster-0/7bb2b2b2-bb21-4a73-8a90-6f81cf6a9884", "cluster-0/0a062e8c-f388-4cbe-a335-6846d4052eb4"}, []string{"cluster-0/d9fd3f13-9f08-430b-830a-43315944160f"}}
+	for idx, i := range relTestUIDs {
+		benchmarkRelationships(relTestDescriptions[idx], i)
+	}
+
+	for idx, i := range savedQueries {
+		uids := selectRandomRecordsV2(0, i)
+		benchmarkRelationships(relTestDescriptions[idx+5], uids)
+	}
 
 	// Benchmark queries
 	fmt.Println("\nBENCHMARK QUERIES")
@@ -131,17 +147,42 @@ func readTemplate() ([]map[string]interface{}, []map[string]interface{}) {
 	edges := data["addEdges"].([]interface{})
 
 	// Edges format is: { "edgeTypeA": ["destUID1", destUID2], "edgeTypeB": ["destUID3"]}
-	findEdges := func(sourceUID string) string {
-		result := make(map[string][]string)
+	findEdgesTo := func(sourceUID string) string {
+		result := make(map[string][][]string)
 		for _, edge := range edges {
 			edgeMap := edge.(map[string]interface{})
 			if edgeMap["SourceUID"] == sourceUID {
 				edgeType := edgeMap["EdgeType"].(string)
+				kind := edgeMap["DestKind"].(string)
+				temp := make([]string, 0)
+				temp = append(temp, edgeMap["DestUID"].(string))
+				temp = append(temp, kind)
 				destUIDs, exist := result[edgeType]
 				if exist {
-					result[edgeType] = append(destUIDs, edgeMap["DestUID"].(string))
+					result[edgeType] = append(destUIDs, temp)
 				} else {
-					result[edgeType] = []string{edgeMap["DestUID"].(string)}
+					result[edgeType] = [][]string{temp}
+				}
+			}
+		}
+		edgeJSON, _ := json.Marshal(result)
+		return string(edgeJSON)
+	}
+	findEdgesFrom := func(destUID string) string {
+		result := make(map[string][][]string)
+		for _, edge := range edges {
+			edgeMap := edge.(map[string]interface{})
+			if edgeMap["DestUID"] == destUID {
+				edgeType := edgeMap["EdgeType"].(string)
+				kind := edgeMap["SourceKind"].(string)
+				temp := make([]string, 0)
+				temp = append(temp, edgeMap["SourceUID"].(string))
+				temp = append(temp, kind)
+				srcUIDs, exist := result[edgeType]
+				if exist {
+					result[edgeType] = append(srcUIDs, temp)
+				} else {
+					result[edgeType] = [][]string{temp}
 				}
 			}
 		}
@@ -155,10 +196,12 @@ func readTemplate() ([]map[string]interface{}, []map[string]interface{}) {
 		properties := record.(map[string]interface{})["properties"]
 		data, _ := json.Marshal(properties)
 
-		e := findEdges(uid.(string))
+		eTo := findEdgesTo(uid.(string))
+		eFrom := findEdgesFrom(uid.(string))
 		// LESSON - QUESTION: UIDs are long and use too much space. What is the risk of compressing?
 		// uid = "local-cluster/" + strings.Split(uid.(string), "-")[5]
-		addResources[i] = map[string]interface{}{"uid": uid, "data": string(data), "edges": e}
+		//fmt.Println(eTo)
+		addResources[i] = map[string]interface{}{"uid": uid, "data": string(data), "edgesTo": eTo, "edgesFrom": eFrom}
 	}
 
 	addEdges := make([]map[string]interface{}, len(edges))
@@ -184,6 +227,10 @@ func insert(records []map[string]interface{}, db *pgxpool.Pool, clusterName stri
 			// edges := record["edges"].(string)
 			// edges = strings.ReplaceAll(edges, "local-cluster", clusterName)
 			// _, err = db.Exec(context.Background(), lastUID, record["data"], edges)
+			edgesTo := record["edgesTo"].(string)
+			edgesTo = strings.ReplaceAll(edgesTo, "local-cluster", clusterName)
+			edgesFrom := record["edgesFrom"].(string)
+			edgesFrom = strings.ReplaceAll(edgesFrom, "local-cluster", clusterName)
 
 			var data map[string]interface{}
 			bytes := []byte(record["data"].(string))
@@ -191,7 +238,7 @@ func insert(records []map[string]interface{}, db *pgxpool.Pool, clusterName stri
 				panic(err)
 			}
 			// fmt.Printf("Pushing to insert channnel... cluster %s. %s\n", clusterName, lastUID)
-			record := &dbclient.Record{UID: lastUID, Cluster: clusterName, Name: "TODO:Name here", Properties: data}
+			record := &dbclient.Record{UID: lastUID, Cluster: clusterName, Name: "TODO:Name here", Properties: data, EdgesTo: edgesTo, EdgesFrom: edgesFrom}
 			dbclient.InsertChan <- record
 		} else {
 			// _, err = statement.Exec(context.Background(), lastUID, record["data"])
@@ -318,4 +365,221 @@ func getEnvOrUseDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func benchmarkRelationships(desc string, uids []string) {
+	fmt.Println("RELATIONSHIP BENCHMARK :", desc)
+	savedQuery := time.Now()
+	collectorMap := make(map[string]map[string]bool)
+	for _, uid := range uids {
+
+		_, _, row := searchRelationsWithUID(uid, "", 1)
+		for k, v := range row {
+			if ck, found := collectorMap[k]; found {
+				for _, everyv := range v {
+					ck[everyv] = true
+				}
+
+			} else {
+				tmp := make(map[string]bool)
+				for _, everyv := range v {
+					tmp[everyv] = true
+				}
+				collectorMap[k] = tmp
+			}
+		}
+
+	}
+	for k, v := range collectorMap {
+		fmt.Println(k, "-->", len(v))
+	}
+	fmt.Printf("%s TIME       : %v \n\n", desc, time.Since(savedQuery))
+}
+
+// Given uid ,returns related objects in a map , map key : "kind" => map value : list of "uid"
+// You can also filter edges by certain relName( edgeType) , ex: ownedBy
+// If no relName( edgeType) is specified all edge types are used
+// depth specifies number of hops , if set to 0 all hops are traversed
+// Uses BFS to find edges
+func searchRelationsWithUID(uid string, relName string, depth int) (int, int, map[string][]string) {
+	//start := time.Now()
+	if depth == 0 {
+		depth = math.MaxInt32
+	}
+	result := make(map[string][]string)
+	visited := make(map[string]bool)
+	var Q []string
+	visited[uid] = true
+	depthFound := 0
+	var currentRels map[string][][]string
+	Q = append(Q, uid)
+	for len(Q) > 0 {
+
+		currentID := Q[0]
+		Q = Q[1:]
+		if depth > depthFound {
+			currentRels = getAllRelationships(currentID)
+			depthFound = depthFound + 1
+		}
+
+		if len(currentRels) == 0 {
+			continue
+		}
+		var vals [][]string
+		var found bool
+		if len(relName) != 0 {
+			if vals, found = currentRels[relName]; !found {
+				continue
+			}
+
+		} else {
+			for _, v := range currentRels {
+				vals = append(vals, v...)
+			}
+		}
+
+		for _, val := range vals {
+			if _, found := visited[val[0]]; !found {
+				Q = append(Q, val[0])
+				visited[val[0]] = true
+				// adding to result map
+				if ids, found := result[val[1]]; found {
+					ids = append(ids, val[0])
+					result[val[1]] = ids
+				} else {
+					result[val[1]] = []string{val[0]}
+				}
+			}
+		}
+
+	}
+	//Collect the edges from resources that connect to the UID
+	depthFound = 0
+	visited = make(map[string]bool)
+	visited[uid] = true
+	Q = append(Q, uid)
+	for len(Q) > 0 {
+		currentID := Q[0]
+		Q = Q[1:]
+		if depth > depthFound {
+			currentRels = getAllConnectedFrom(currentID)
+			depthFound = depthFound + 1
+		}
+		if len(currentRels) == 0 {
+			continue
+		}
+		var vals [][]string
+		var found bool
+		if len(relName) != 0 {
+			if vals, found = currentRels[relName]; !found {
+				continue
+			}
+		} else {
+			for _, v := range currentRels {
+				vals = append(vals, v...)
+			}
+		}
+		for _, val := range vals {
+			if _, found := visited[val[0]]; !found {
+				Q = append(Q, val[0])
+				visited[val[0]] = true
+				// adding to result map
+				if ids, found := result[val[1]]; found {
+					ids = append(ids, val[0])
+					result[val[1]] = ids
+				} else {
+					result[val[1]] = []string{val[0]}
+				}
+			}
+		}
+
+	}
+
+	/*if len(result) > 0 {
+		fmt.Println("Starting uid : ", uid)
+		fmt.Println("maxDepth", depthFound, "==", "totalEdges", len(result), "==", result)
+		fmt.Printf("TIME       : %v \n\n", time.Since(start))
+	}*/
+
+	return depthFound, len(result), result
+
+}
+
+// A function to get the relatedTo filed as a map Given the id , in resources table
+func getAllRelationships(uid string) map[string][][]string {
+	var relatedTo map[string][][]string
+	rows, err := database.Query(context.Background(), "SELECT edgesTo FROM resources where uid=$1 ", uid)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+	var relatedTo2 string
+
+	for rows.Next() {
+		rows.Scan(&relatedTo2)
+	}
+	//fmt.Println(relatedTo2)
+	rows.Close()
+	if err := json.Unmarshal([]byte(relatedTo2), &relatedTo); err != nil {
+		panic(err)
+	}
+	//fmt.Println(uid, "==>", "(", kind, ")", relatedTo)
+	return relatedTo
+}
+
+func generateAllRelationships() {
+	rows, _ := database.Query(context.Background(), "SELECT uid FROM resources")
+	var uids []string
+	var uid string
+
+	for rows.Next() {
+		rows.Scan(&uid)
+		uids = append(uids, uid)
+	}
+	rows.Close()
+	for _, uid := range uids {
+		//obtain all the nodes that can be travered from uid
+		searchRelationsWithUID(uid, "", 0)
+	}
+
+}
+func getAllConnectedFrom(uid string) map[string][][]string {
+	var relatedTo map[string][][]string
+	rows, err := database.Query(context.Background(), "SELECT edgesFrom FROM resources where uid=$1 ", uid)
+
+	if err != nil {
+		fmt.Println(err)
+	}
+	var relatedTo2 string
+
+	for rows.Next() {
+		rows.Scan(&relatedTo2)
+	}
+	rows.Close()
+	if err := json.Unmarshal([]byte(relatedTo2), &relatedTo); err != nil {
+		panic(err)
+	}
+	//fmt.Println(uid, "<==", "(", kind, ")", relatedTo)
+	return relatedTo
+}
+
+func selectRandomRecordsV2(total int, query string) []string {
+	var uids []string
+	var records pgx.Rows
+
+	if query == "" {
+		records, _ = database.Query(context.Background(), "SELECT uid FROM resources ORDER BY RANDOM() LIMIT $1", total)
+		uids = make([]string, total)
+	} else {
+		records, _ = database.Query(context.Background(), query)
+	}
+	var id string
+	for i := 0; records.Next(); i++ {
+		scanErr := records.Scan(&id)
+		uids = append(uids, id)
+		if scanErr != nil {
+			fmt.Println(scanErr)
+		}
+	}
+	return uids
 }

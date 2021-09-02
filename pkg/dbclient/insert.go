@@ -23,7 +23,7 @@ func batchInsert(instance string) {
 				panic(fmt.Sprintf("Error Marshaling json. %v %v", err, json))
 			}
 
-			batch.Queue("INSERT into resources values($1,$2,$3)", record.UID, record.Cluster, string(json))
+			batch.Queue("INSERT into resources values($1,$2,$3,$4,$5)", record.UID, record.Cluster, string(json), record.EdgesTo, record.EdgesFrom)
 		}
 
 		if batch.Len() == BatchSize || (!more && batch.Len() > 0) {
