@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	TOTAL_CLUSTERS   = 5 // Number of SNO clusters to simulate.
+	TOTAL_CLUSTERS   = 100 // Number of SNO clusters to simulate.
 	PRINT_RESULTS    = true
 	SINGLE_TABLE     = true // Store relationships in single table or separate table.
 	UPDATE_TOTAL     = 1000 // Number of records to update.
@@ -44,6 +44,7 @@ func main() {
 		} else { // this is case where single table but not cluster sharding
 			database.Exec(context.Background(), "DROP TABLE resources")
 			database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, relatedto JSONB)")
+			// nodeStmt, _ = database.Prepare(fmt.Sprintf("INSERT INTO resources (uid, cluster, data, relatedTo) VALUES (?, ?, ?, ?)"))
 
 		}
 	} else {
@@ -61,20 +62,23 @@ func main() {
 
 	// LESSON: When using BEGIN and COMMIT TRANSACTION saving to a file is comparable to in memory.
 	for i := 0; i < TOTAL_CLUSTERS; i++ {
-		// database.Exec("BEGIN TRANSACTION")
-		if CLUSTER_SHARDING {
-			clusterName := fmt.Sprintf("cluster%d", i)
-			insert(addNodes, database, clusterName)
 
-			// database.Exec("BEGIN TRANSACTION")
-		} else {
-			insert(addNodes, database, fmt.Sprintf("cluster-%d", i))
-			if !SINGLE_TABLE {
-				insertEdges(addEdges, edgeStmt, fmt.Sprintf("cluster-%d", i))
-			}
-			// database.Exec("COMMIT TRANSACTION")
+		// clusterName := fmt.Sprintf("cluster%d", i)
+		// // database.Exec("BEGIN TRANSACTION")
+		// if CLUSTER_SHARDING {
+
+		// 	nodeStmt, _ = database.Prepare(fmt.Sprintf("INSERT INTO '%s' (uid, cluster, data, relatedTo) VALUES (?, ?, ?, ?)", clusterName)) //inserting data values (id, data) into each cluster table
+		// 	insert_into_tables(addNodes, nodeStmt, fmt.Sprintf("cluster%d", i))
+
+		// 	// database.Exec("BEGIN TRANSACTION")
+		// } else {
+		insert(addNodes, database, fmt.Sprintf("cluster-%d", i))
+		if !SINGLE_TABLE {
+			insertEdges(addEdges, edgeStmt, fmt.Sprintf("cluster-%d", i))
 		}
+		// database.Exec("COMMIT TRANSACTION")
 	}
+
 	// WORKAROUND to flush the insert channel.
 	close(dbclient.InsertChan)
 	time.Sleep(1 * time.Second)
@@ -210,6 +214,7 @@ func insert(records []map[string]interface{}, db *pgxpool.Pool, clusterName stri
 			// fmt.Printf("Pushing to insert channnel... cluster %s. %s\n", clusterName, lastUID)
 			record := &dbclient.Record{UID: lastUID, Cluster: clusterName, Name: "TODO:Name here", Properties: data}
 			dbclient.InsertChan <- record
+
 		} else {
 			// _, err = statement.Exec(context.Background(), lastUID, record["data"])
 
@@ -223,6 +228,27 @@ func insert(records []map[string]interface{}, db *pgxpool.Pool, clusterName stri
 	}
 	// tx.Commit(context.Background())
 }
+
+// func insert_into_tables(records []map[string]interface{}, statement *sql.Stmt, clusterName string) {
+// 	fmt.Print(".")
+
+// 	for _, record := range records {
+// 		lastUID = strings.Replace(record["uid"].(string), "local-cluster", clusterName, 1)
+// 		var err error
+// 		if SINGLE_TABLE {
+// 			// edges := record["edges"].(string)
+// 			// edges = strings.ReplaceAll(edges, "local-cluster", clusterName)
+// 			_, err = statement.Exec(lastUID, clusterName, record["data"]) //need to add edge here
+// 		} else {
+// 			_, err = statement.Exec(lastUID, clusterName, record["data"])
+
+// 			if err != nil {
+// 				fmt.Println("Error inserting record:", err)
+// 			}
+// 		}
+
+// 	}
+// }
 
 /*
  * Insert edges in separate table.
@@ -240,40 +266,66 @@ func insertEdges(edges []map[string]interface{}, statement *sql.Stmt, clusterNam
 	}
 }
 
-// func benchmarkQuery(database *sql.DB, q string, printResult bool) {
-// 	startQuery := time.Now()
-// 	rows, queryError := database.Query(q)
-// 	defer rows.Close()
-// 	if queryError != nil {
-// 		fmt.Println("Error executing query: ", queryError)
-// 	}
+func createView(database *sql.DB, names string) {
+	// database.Exec(fmt.Sprintf("CREATE VIEW IF NOT EXISTS combined AS SELECT name FROM benchmark.tables"))
+	rows, queryError := database.Query(names)
+	if queryError != nil {
+		fmt.Println("Error executing query: ", queryError)
+	}
+	createViewQuery := "CREATE VIEW resource_view AS "
 
-// 	fmt.Println("QUERY      :", q)
-// 	if printResult {
-// 		fmt.Println("RESULTS    :")
-// 	} else {
-// 		fmt.Println("RESULTS    : To print results set PRINT_RESULTS=true")
-// 	}
+	for i := 0; rows.Next(); i++ {
 
-// 	for rows.Next() {
-// 		columns, _ := rows.Columns()
-// 		columnData := make([]string, 3)
-// 		switch len(columns) {
-// 		case 3:
-// 			rows.Scan(&columnData[0], &columnData[1], &columnData[2])
-// 		case 2:
-// 			rows.Scan(&columnData[0], &columnData[1])
-// 		default:
-// 			rows.Scan(&columnData[0])
-// 		}
+		var clusterName string
+		rows.Scan(&clusterName) //this convert the values from rows into string go object.
+		if i == 0 {
+			createViewQuery = createViewQuery + "SELECT * FROM '" + clusterName + "'"
+		} else {
+			createViewQuery = createViewQuery + " UNION ALL SELECT * FROM '" + clusterName + "'"
+		}
+	}
+	// fmt.Println(createViewQuery)
+	_, createViewError := database.Exec(createViewQuery)
+	if createViewError != nil {
+		fmt.Println("Error creating view : ", createViewError)
+	}
+	database.Exec("COMMIT TRANSACTION")
+}
 
-// 		if printResult {
-// 			fmt.Println("  *\t", columnData[0], columnData[1], columnData[2])
-// 		}
-// 	}
-// 	// LESSON: We can stream results from rows, but using aggregation and sorting will delay results because we have to process al records first.
-// 	fmt.Printf("TIME       : %v \n\n", time.Since(startQuery))
-// }
+func benchmarkQuery(database *sql.DB, q string, printResult bool) {
+	startQuery := time.Now()
+	rows, queryError := database.Query(q)
+	defer rows.Close()
+	if queryError != nil {
+		fmt.Println("Error executing query: ", queryError)
+	}
+
+	fmt.Println("QUERY      :", q)
+	if printResult {
+		fmt.Println("RESULTS    :")
+	} else {
+		fmt.Println("RESULTS    : To print results set PRINT_RESULTS=true")
+	}
+
+	for rows.Next() {
+		columns, _ := rows.Columns()
+		columnData := make([]string, 3)
+		switch len(columns) {
+		case 3:
+			rows.Scan(&columnData[0], &columnData[1], &columnData[2])
+		case 2:
+			rows.Scan(&columnData[0], &columnData[1])
+		default:
+			rows.Scan(&columnData[0])
+		}
+
+		if printResult {
+			fmt.Println("  *\t", columnData[0], columnData[1], columnData[2])
+		}
+	}
+	// LESSON: We can stream results from rows, but using aggregation and sorting will delay results because we have to process al records first.
+	fmt.Printf("TIME       : %v \n\n", time.Since(startQuery))
+}
 
 /*
  * Helper method to select records for Update and Delete.

@@ -9,6 +9,8 @@ import (
 )
 
 const BatchSize = 500
+const CLUSTER_SHARDING = false
+const TOTAL_CLUSTERS = 100
 
 // Process records using batched INSERT requests.
 func batchInsert(instance string) {
@@ -23,7 +25,17 @@ func batchInsert(instance string) {
 				panic(fmt.Sprintf("Error Marshaling json. %v %v", err, json))
 			}
 
-			batch.Queue("INSERT into resources values($1,$2,$3)", record.UID, record.Cluster, string(json))
+			if CLUSTER_SHARDING {
+
+				for i := 0; i < TOTAL_CLUSTERS; i++ {
+					clusterName := fmt.Sprintf("cluster%d", i)
+
+					batch.Queue("INSERT INTO '%s' values($1,$2,$3,$4)", clusterName, record.UID, record.Cluster, string(json))
+				}
+
+			} else {
+				batch.Queue("INSERT into resources values($1,$2,$3,$4)", record.UID, record.Cluster, string(json))
+			}
 		}
 
 		if batch.Len() == BatchSize || (!more && batch.Len() > 0) {
