@@ -20,7 +20,7 @@ const (
 	SINGLE_TABLE     = true // Store relationships in single table or separate table.
 	UPDATE_TOTAL     = 1000 // Number of records to update.
 	DELETE_TOTAL     = 1000 // Number of records to delete.
-	CLUSTER_SHARDING = false
+	CLUSTER_SHARDING = true
 )
 
 var lastUID string
@@ -39,11 +39,11 @@ func main() {
 			for i := 0; i < TOTAL_CLUSTERS; i++ {
 				clusterName := fmt.Sprintf("cluster%d", i)
 				database.Exec(context.Background(), "DROP TABLE resources")
-				database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS '%s' (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, relatedto JSONB)", clusterName)
+				database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS '%s' (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT, edgesFrom TEXT))", clusterName)
 			}
 		} else { // this is case where single table but not cluster sharding
 			database.Exec(context.Background(), "DROP TABLE resources")
-			database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, relatedto JSONB)")
+			database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT, edgesFrom TEXT))")
 			// nodeStmt, _ = database.Prepare(fmt.Sprintf("INSERT INTO resources (uid, cluster, data, relatedTo) VALUES (?, ?, ?, ?)"))
 
 		}
@@ -85,34 +85,50 @@ func main() {
 
 	fmt.Println("\nInsert took", time.Since(start))
 
+	fmt.Printf("Total clusters: %d \n\n", TOTAL_CLUSTERS)
+
 	// Benchmark queries
 	fmt.Println("\nBENCHMARK QUERIES")
 
-	fmt.Println("\nDESCRIPTION: Find a record using the UID")
-	dbclient.BenchmarkQuery(fmt.Sprintf("SELECT uid, data FROM resources WHERE uid='%s'", lastUID), true)
+	// if SINGLE_TABLE {
+	// 	if CLUSTER_SHARDING {
 
-	fmt.Println("\nDESCRIPTION: Count all resources")
-	dbclient.BenchmarkQuery("SELECT count(*) from resources", true)
+	// 		dbclient.BenchmarkQuery("SELECT * FROM information_schema.tables", true)
 
-	// if !SINGLE_TABLE {
-	// 	fmt.Println("\nDESCRIPTION: Count all relationships")
-	// 	benchmarkQuery(database, "SELECT count(*) FROM relationships", true)
+	// 		// fmt.Println("DESCRIPTION: Create a view.")
+	// 		// createView(database, "SELECT name FROM sqlite_master where type='table' and name like 'cluster%'")
+	// 		// database.Exec("COMMIT TRANSACTION")
+
+	// 	}
 	// }
 
-	fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
-	dbclient.BenchmarkQuery("SELECT uid, data from resources WHERE data->>'status' = 'Running' LIMIT 10", PRINT_RESULTS)
+	dbclient.BenchmarkQuery("SELECT * FROM information_schema.tables", true)
 
-	fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace'")
-	dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from resources", PRINT_RESULTS)
+	// fmt.Println("\nDESCRIPTION: Find a record using the UID")
+	// dbclient.BenchmarkQuery(fmt.Sprintf("SELECT uid, data FROM resources WHERE uid='%s'", lastUID), true)
 
-	// LESSON: Adding ORDER BY increases execution time by 2x.
-	fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
-	dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' as namespace from resources ORDER BY namespace ASC", PRINT_RESULTS)
+	// fmt.Println("\nDESCRIPTION: Count all resources")
+	// dbclient.BenchmarkQuery("SELECT count(*) from resources", true)
 
-	fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
-	dbclient.BenchmarkQuery("SELECT data->>'kind' as kind, count(data->>'kind') as count FROM resources GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
+	// // if !SINGLE_TABLE {
+	// // 	fmt.Println("\nDESCRIPTION: Count all relationships")
+	// // 	benchmarkQuery(database, "SELECT count(*) FROM relationships", true)
+	// // }
 
-	fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
+	// fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
+	// dbclient.BenchmarkQuery("SELECT uid, data from resources WHERE data->>'status' = 'Running' LIMIT 10", PRINT_RESULTS)
+
+	// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace'")
+	// dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from resources", PRINT_RESULTS)
+
+	// // LESSON: Adding ORDER BY increases execution time by 2x.
+	// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
+	// dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' as namespace from resources ORDER BY namespace ASC", PRINT_RESULTS)
+
+	// fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
+	// dbclient.BenchmarkQuery("SELECT data->>'kind' as kind, count(data->>'kind') as count FROM resources GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
+
+	// fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
 	// benchmarkQuery(database, "SELECT kind, count(*) as count FROM (SELECT json_extract(resources.data, '$.kind') as kind FROM resources) GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
 	// dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT data->>'kind' as kind FROM resources) GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
 
@@ -152,17 +168,43 @@ func readTemplate() ([]map[string]interface{}, []map[string]interface{}) {
 	edges := data["addEdges"].([]interface{})
 
 	// Edges format is: { "edgeTypeA": ["destUID1", destUID2], "edgeTypeB": ["destUID3"]}
-	findEdges := func(sourceUID string) string {
-		result := make(map[string][]string)
+	findEdgesTo := func(sourceUID string) string {
+		result := make(map[string][][]string)
 		for _, edge := range edges {
 			edgeMap := edge.(map[string]interface{})
 			if edgeMap["SourceUID"] == sourceUID {
 				edgeType := edgeMap["EdgeType"].(string)
+				kind := edgeMap["DestKind"].(string)
+				temp := make([]string, 0)
+				temp = append(temp, edgeMap["DestUID"].(string))
+				temp = append(temp, kind)
 				destUIDs, exist := result[edgeType]
 				if exist {
-					result[edgeType] = append(destUIDs, edgeMap["DestUID"].(string))
+					result[edgeType] = append(destUIDs, temp)
 				} else {
-					result[edgeType] = []string{edgeMap["DestUID"].(string)}
+					result[edgeType] = [][]string{temp}
+				}
+			}
+		}
+		edgeJSON, _ := json.Marshal(result)
+		return string(edgeJSON)
+	}
+
+	findEdgesFrom := func(destUID string) string {
+		result := make(map[string][][]string)
+		for _, edge := range edges {
+			edgeMap := edge.(map[string]interface{})
+			if edgeMap["DestUID"] == destUID {
+				edgeType := edgeMap["EdgeType"].(string)
+				kind := edgeMap["SourceKind"].(string)
+				temp := make([]string, 0)
+				temp = append(temp, edgeMap["SourceUID"].(string))
+				temp = append(temp, kind)
+				srcUIDs, exist := result[edgeType]
+				if exist {
+					result[edgeType] = append(srcUIDs, temp)
+				} else {
+					result[edgeType] = [][]string{temp}
 				}
 			}
 		}
@@ -176,10 +218,12 @@ func readTemplate() ([]map[string]interface{}, []map[string]interface{}) {
 		properties := record.(map[string]interface{})["properties"]
 		data, _ := json.Marshal(properties)
 
-		e := findEdges(uid.(string))
+		eTo := findEdgesTo(uid.(string))
+		eFrom := findEdgesFrom(uid.(string))
 		// LESSON - QUESTION: UIDs are long and use too much space. What is the risk of compressing?
 		// uid = "local-cluster/" + strings.Split(uid.(string), "-")[5]
-		addResources[i] = map[string]interface{}{"uid": uid, "data": string(data), "edges": e}
+		//fmt.Println(eTo)
+		addResources[i] = map[string]interface{}{"uid": uid, "data": string(data), "edgesTo": eTo, "edgesFrom": eFrom}
 	}
 
 	addEdges := make([]map[string]interface{}, len(edges))
@@ -205,6 +249,10 @@ func insert(records []map[string]interface{}, db *pgxpool.Pool, clusterName stri
 			// edges := record["edges"].(string)
 			// edges = strings.ReplaceAll(edges, "local-cluster", clusterName)
 			// _, err = db.Exec(context.Background(), lastUID, record["data"], edges)
+			edgesTo := record["edgesTo"].(string)
+			edgesTo = strings.ReplaceAll(edgesTo, "local-cluster", clusterName)
+			edgesFrom := record["edgesFrom"].(string)
+			edgesFrom = strings.ReplaceAll(edgesFrom, "local-cluster", clusterName)
 
 			var data map[string]interface{}
 			bytes := []byte(record["data"].(string))
@@ -212,9 +260,8 @@ func insert(records []map[string]interface{}, db *pgxpool.Pool, clusterName stri
 				panic(err)
 			}
 			// fmt.Printf("Pushing to insert channnel... cluster %s. %s\n", clusterName, lastUID)
-			record := &dbclient.Record{UID: lastUID, Cluster: clusterName, Name: "TODO:Name here", Properties: data}
+			record := &dbclient.Record{UID: lastUID, Cluster: clusterName, Name: "TODO:Name here", Properties: data, EdgesTo: edgesTo, EdgesFrom: edgesFrom}
 			dbclient.InsertChan <- record
-
 		} else {
 			// _, err = statement.Exec(context.Background(), lastUID, record["data"])
 

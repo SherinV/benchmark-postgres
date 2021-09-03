@@ -18,7 +18,7 @@ spec:
       imagePullSecrets:
       - name: anxhela21-pull-secret
       containers:
-      - image: quay.io/anxhela21/benchmark-postgres:latest
+      - image: quay.io/anxhela21/benchmark-postgres:cluster100
         imagePullPolicy: Always
         name: benchmark
         resources: {}

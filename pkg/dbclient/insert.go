@@ -9,7 +9,7 @@ import (
 )
 
 const BatchSize = 500
-const CLUSTER_SHARDING = false
+const CLUSTER_SHARDING = true
 const TOTAL_CLUSTERS = 100
 
 // Process records using batched INSERT requests.
@@ -30,11 +30,11 @@ func batchInsert(instance string) {
 				for i := 0; i < TOTAL_CLUSTERS; i++ {
 					clusterName := fmt.Sprintf("cluster%d", i)
 
-					batch.Queue("INSERT INTO '%s' values($1,$2,$3,$4)", clusterName, record.UID, record.Cluster, string(json))
+					batch.Queue(fmt.Sprintf("INSERT INTO %s values($1,$2,$3,$4,$5)", clusterName), record.UID, record.Cluster, string(json), record.EdgesTo, record.EdgesFrom)
 				}
 
 			} else {
-				batch.Queue("INSERT into resources values($1,$2,$3,$4)", record.UID, record.Cluster, string(json))
+				batch.Queue("INSERT into resources values($1,$2,$3,$4,$5)", record.UID, record.Cluster, string(json), record.EdgesTo, record.EdgesFrom)
 			}
 		}
 

@@ -21,6 +21,8 @@ type Record struct {
 	Cluster    string
 	Name       string
 	Properties map[string]interface{}
+	EdgesTo    string
+	EdgesFrom  string
 }
 
 func init() {
