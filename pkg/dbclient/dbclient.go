@@ -17,6 +17,7 @@ var pool *pgxpool.Pool
 var InsertChan chan *Record
 
 type Record struct {
+	TableName  string
 	UID        string
 	Cluster    string
 	Name       string
