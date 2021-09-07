@@ -10,6 +10,8 @@ import (
 
 const BatchSize = 500
 
+var Single_table bool
+
 // Process records using batched INSERT requests.
 func batchInsert(instance string) {
 	batch := &pgx.Batch{}
@@ -22,8 +24,14 @@ func batchInsert(instance string) {
 			if err != nil {
 				panic(fmt.Sprintf("Error Marshaling json. %v %v", err, json))
 			}
+			if Single_table {
+				batch.Queue("INSERT into resources values($1,$2,$3,$4,$5)", record.UID, record.Cluster, string(json), record.EdgesTo, record.EdgesFrom)
+			} else {
+				iquery := fmt.Sprintf("INSERT into %s values($1,$2,$3,$4,$5)", record.Cluster)
 
-			batch.Queue("INSERT into resources values($1,$2,$3,$4,$5)", record.UID, record.Cluster, string(json), record.EdgesTo, record.EdgesFrom)
+				batch.Queue(iquery, record.UID, record.Cluster, string(json), record.EdgesTo, record.EdgesFrom)
+			}
+
 		}
 
 		if batch.Len() == BatchSize || (!more && batch.Len() > 0) {

@@ -17,36 +17,51 @@ import (
 )
 
 const (
-	TOTAL_CLUSTERS = 100 // Number of SNO clusters to simulate.
+	TOTAL_CLUSTERS = 10 // Number of SNO clusters to simulate.
 	PRINT_RESULTS  = true
-	SINGLE_TABLE   = true // Store relationships in single table or separate table.
-	UPDATE_TOTAL   = 1000 // Number of records to update.
-	DELETE_TOTAL   = 1000 // Number of records to delete.
+	SINGLE_TABLE   = false // Store relationships in single table or separate table.
+	UPDATE_TOTAL   = 1000  // Number of records to update.
+	DELETE_TOTAL   = 1000  // Number of records to delete.
 )
 
 var lastUID string
 var database *pgxpool.Pool
 
 func main() {
+	dbclient.Single_table = SINGLE_TABLE
 	fmt.Printf("Loading %d clusters from template data.\n\n", TOTAL_CLUSTERS)
 
 	// Open the PostgreSQL database.
 	database = dbclient.GetConnection()
 
 	// Initialize the database tables.
-	var edgeStmt *sql.Stmt
+	//var edgeStmt *sql.Stmt
 	if SINGLE_TABLE {
 		database.Exec(context.Background(), "DROP TABLE resources")
 		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT,edgesFrom TEXT)")
 	} else {
-		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, data TEXT)")
-		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS relationships (sourceId TEXT, destId TEXT)")
+		for i := 0; i < TOTAL_CLUSTERS; i++ {
+			clusterName := fmt.Sprintf("cluster%d", i)
+
+			dquery := fmt.Sprintf("DROP TABLE  %s", clusterName)
+
+			cquery := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT,edgesFrom TEXT)", clusterName)
+			fmt.Println("creating", clusterName)
+			database.Exec(context.Background(), dquery)
+
+			_, err := database.Exec(context.Background(), cquery)
+			if err != nil {
+				fmt.Println(err)
+			}
+
+		}
+
 		// nodeStmt, _ = database.Prepare("INSERT INTO resources (uid, data) VALUES ($1, $2)")
 		// edgeStmt, _ = database.Prepare("INSERT INTO relationships (sourceId, destId) VALUES ($1, $2)")
 	}
 
 	// Load data from file and unmarshall JSON only once.
-	addNodes, addEdges := readTemplate()
+	addNodes, _ := readTemplate()
 
 	// Start counting here to exclude time it takes to read file and unmarshall json
 	start := time.Now()
@@ -54,10 +69,10 @@ func main() {
 	// LESSON: When using BEGIN and COMMIT TRANSACTION saving to a file is comparable to in memory.
 	for i := 0; i < TOTAL_CLUSTERS; i++ {
 		// database.Exec("BEGIN TRANSACTION")
-		insert(addNodes, database, fmt.Sprintf("cluster-%d", i))
-		if !SINGLE_TABLE {
-			insertEdges(addEdges, edgeStmt, fmt.Sprintf("cluster-%d", i))
-		}
+		insert(addNodes, database, fmt.Sprintf("cluster%d", i))
+		//if !SINGLE_TABLE {
+		//	insertEdges(addEdges, edgeStmt, fmt.Sprintf("cluster-%d", i))
+		//}
 		// database.Exec("COMMIT TRANSACTION")
 	}
 
@@ -223,29 +238,29 @@ func insert(records []map[string]interface{}, db *pgxpool.Pool, clusterName stri
 	for _, record := range records {
 		lastUID = strings.Replace(record["uid"].(string), "local-cluster", clusterName, 1)
 		// var err error
-		if SINGLE_TABLE {
-			// edges := record["edges"].(string)
-			// edges = strings.ReplaceAll(edges, "local-cluster", clusterName)
-			// _, err = db.Exec(context.Background(), lastUID, record["data"], edges)
-			edgesTo := record["edgesTo"].(string)
-			edgesTo = strings.ReplaceAll(edgesTo, "local-cluster", clusterName)
-			edgesFrom := record["edgesFrom"].(string)
-			edgesFrom = strings.ReplaceAll(edgesFrom, "local-cluster", clusterName)
+		//if SINGLE_TABLE {
+		// edges := record["edges"].(string)
+		// edges = strings.ReplaceAll(edges, "local-cluster", clusterName)
+		// _, err = db.Exec(context.Background(), lastUID, record["data"], edges)
+		edgesTo := record["edgesTo"].(string)
+		edgesTo = strings.ReplaceAll(edgesTo, "local-cluster", clusterName)
+		edgesFrom := record["edgesFrom"].(string)
+		edgesFrom = strings.ReplaceAll(edgesFrom, "local-cluster", clusterName)
 
-			var data map[string]interface{}
-			bytes := []byte(record["data"].(string))
-			if err := json.Unmarshal(bytes, &data); err != nil {
-				panic(err)
-			}
-			// fmt.Printf("Pushing to insert channnel... cluster %s. %s\n", clusterName, lastUID)
-			record := &dbclient.Record{UID: lastUID, Cluster: clusterName, Name: "TODO:Name here", Properties: data, EdgesTo: edgesTo, EdgesFrom: edgesFrom}
-			dbclient.InsertChan <- record
-		} else {
-			// _, err = statement.Exec(context.Background(), lastUID, record["data"])
-
-			record := &dbclient.Record{UID: lastUID, Cluster: clusterName, Name: "TODO:Name here", Properties: record["data"].(map[string]interface{})}
-			dbclient.InsertChan <- record
+		var data map[string]interface{}
+		bytes := []byte(record["data"].(string))
+		if err := json.Unmarshal(bytes, &data); err != nil {
+			panic(err)
 		}
+		// fmt.Printf("Pushing to insert channnel... cluster %s. %s\n", clusterName, lastUID)
+		record := &dbclient.Record{UID: lastUID, Cluster: clusterName, Name: "TODO:Name here", Properties: data, EdgesTo: edgesTo, EdgesFrom: edgesFrom}
+		dbclient.InsertChan <- record
+		//} else {
+		// _, err = statement.Exec(context.Background(), lastUID, record["data"])
+
+		//record := &dbclient.Record{UID: lastUID, Cluster: clusterName, Name: "TODO:Name here", Properties: record["data"].(map[string]interface{})}
+		//dbclient.InsertChan <- record
+		//}
 		// if err != nil {
 		// 	fmt.Println("Error inserting record:", err, statement)
 		// 	panic(err)
@@ -508,7 +523,12 @@ func searchRelationsWithUID(uid string, relName string, depth int) (int, int, ma
 // A function to get the relatedTo filed as a map Given the id , in resources table
 func getAllRelationships(uid string) map[string][][]string {
 	var relatedTo map[string][][]string
-	rows, err := database.Query(context.Background(), "SELECT edgesTo FROM resources where uid=$1 ", uid)
+	tableName := uid[:strings.Index(uid, "/")]
+	tableNameClean := strings.ReplaceAll(tableName, "-", "")
+
+	dquery := fmt.Sprintf("SELECT edgesTo FROM %s where uid='%s'", tableNameClean, uid)
+
+	rows, err := database.Query(context.Background(), dquery)
 
 	if err != nil {
 		fmt.Println(err)
@@ -518,10 +538,11 @@ func getAllRelationships(uid string) map[string][][]string {
 	for rows.Next() {
 		rows.Scan(&relatedTo2)
 	}
+	fmt.Println("relatedTo2", relatedTo2)
 	//fmt.Println(relatedTo2)
 	rows.Close()
 	if err := json.Unmarshal([]byte(relatedTo2), &relatedTo); err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	//fmt.Println(uid, "==>", "(", kind, ")", relatedTo)
 	return relatedTo
@@ -545,7 +566,15 @@ func generateAllRelationships() {
 }
 func getAllConnectedFrom(uid string) map[string][][]string {
 	var relatedTo map[string][][]string
-	rows, err := database.Query(context.Background(), "SELECT edgesFrom FROM resources where uid=$1 ", uid)
+
+	tableName := uid[:strings.Index(uid, "/")]
+	tableNameClean := strings.ReplaceAll(tableName, "-", "")
+
+	dquery := fmt.Sprintf("SELECT edgesFrom FROM %s where uid='%s'", tableNameClean, uid)
+
+	rows, err := database.Query(context.Background(), dquery)
+
+	//rows, err := database.Query(context.Background(), "SELECT edgesFrom FROM resources where uid=$1 ", uid)
 
 	if err != nil {
 		fmt.Println(err)
@@ -557,7 +586,7 @@ func getAllConnectedFrom(uid string) map[string][][]string {
 	}
 	rows.Close()
 	if err := json.Unmarshal([]byte(relatedTo2), &relatedTo); err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	//fmt.Println(uid, "<==", "(", kind, ")", relatedTo)
 	return relatedTo
