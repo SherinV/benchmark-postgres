@@ -38,7 +38,7 @@ func main() {
 	//var edgeStmt *sql.Stmt
 	if SINGLE_TABLE {
 		database.Exec(context.Background(), "DROP TABLE resources")
-		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, ,edgedgesTo TEXTesFrom TEXT)")
+		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT,edgesFrom TEXT)")
 	} else {
 		for i := 0; i < TOTAL_CLUSTERS; i++ {
 			clusterName := fmt.Sprintf("cluster%d", i)
