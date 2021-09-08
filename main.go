@@ -129,36 +129,36 @@ func main() {
 	if SINGLE_TABLE && CLUSTER_SHARDING {
 
 		fmt.Println("\nDESCRIPTION: Find a record using the UID")
-		dbclient.BenchmarkQuery(fmt.Sprintf("SELECT id, data FROM resource_view WHERE id='%s'", lastUID), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf("SELECT uid, data FROM resource_view WHERE uid='%s'", lastUID), true)
 
 		fmt.Println("\nDESCRIPTION: Count all resources")
 		dbclient.BenchmarkQuery("SELECT count(*) from resource_view", true)
 
 		fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
-		dbclient.BenchmarkQuery("SELECT uid, data from resource_view where data->> 'status' = 'Running' LIMIT 10", false)
+		dbclient.BenchmarkQuery("SELECT uid, data from resource_view where data->> 'status' = 'Running' LIMIT 10", true)
 
 		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' from view")
-		dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from resource_view", false)
+		dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from resource_view", true)
 
 		//specific cluster known ^
-		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' from cluster1")
-		dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from cluster1", false)
+		// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' from cluster1")
+		// dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from cluster1", false)
 
 		// LESSON: Adding ORDER BY increases execution time by 2x.
-		// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
-		// benchmarkQuery(database, "SELECT DISTINCT json_extract(data, '$.namespace') as namespace from resource_view ORDER BY namespace ASC", false)
+		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
+		dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' as namespace from resource_view ORDER BY namespace ASC", true)
 
 		// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' (no-sorting)")
 		// benchmarkQuery(database, "SELECT DISTINCT json_extract(data, '$.namespace') as namespace from resource_view", false)
 
 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' (without order-by)")
-		dbclient.BenchmarkQuery("SELECT data->>'kind' as kind , count(data->>'kind') as count FROM resource_view GROUP BY kind", false)
+		dbclient.BenchmarkQuery("SELECT data->>'kind' as kind , count(data->>'kind') as count FROM resource_view GROUP BY kind", true)
 
 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
-		dbclient.BenchmarkQuery("SELECT data->>'kind' as kind , count(data->>'kind') as count FROM resource_view GROUP BY kind ORDER BY count DESC", false)
+		dbclient.BenchmarkQuery("SELECT data->>'kind' as kind , count(data->>'kind') as count FROM resource_view GROUP BY kind ORDER BY count DESC", true)
 
 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
-		dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT data->>'kind' as kind FROM resource_view) GROUP BY kind ORDER BY count DESC", false)
+		dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT data->>'kind' as kind FROM resource_view)A GROUP BY kind ORDER BY count DESC", true)
 
 		// fmt.Println("\nDESCRIPTION: Delete a single record.")
 		// dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM cluster3 WHERE uid='cluster3/29ac6c4a-181c-499f-b059-977d7e9889dd'"), true)
