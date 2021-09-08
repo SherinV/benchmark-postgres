@@ -19,9 +19,9 @@ import (
 const (
 	TOTAL_CLUSTERS = 100 // Number of SNO clusters to simulate.
 	PRINT_RESULTS  = true
-	SINGLE_TABLE   = false // Store relationships in single table or separate table.
-	UPDATE_TOTAL   = 1000  // Number of records to update.
-	DELETE_TOTAL   = 1000  // Number of records to delete.
+	SINGLE_TABLE   = true // Store relationships in single table or separate table.
+	UPDATE_TOTAL   = 1000 // Number of records to update.
+	DELETE_TOTAL   = 1000 // Number of records to delete.
 )
 
 var lastUID string
@@ -38,14 +38,14 @@ func main() {
 	//var edgeStmt *sql.Stmt
 	if SINGLE_TABLE {
 		database.Exec(context.Background(), "DROP TABLE resources")
-		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT,edgesFrom TEXT)")
+		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data TEXT, edgesTo TEXT,edgesFrom TEXT)")
 	} else {
 		for i := 0; i < TOTAL_CLUSTERS; i++ {
 			clusterName := fmt.Sprintf("cluster%d", i)
 
 			dquery := fmt.Sprintf("DROP TABLE  %s", clusterName)
 
-			cquery := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT,edgesFrom TEXT)", clusterName)
+			cquery := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (uid TEXT PRIMARY KEY, cluster TEXT, data TEXT, edgesTo TEXT,edgesFrom TEXT)", clusterName)
 			fmt.Println("creating", clusterName)
 			database.Exec(context.Background(), dquery)
 
@@ -110,19 +110,19 @@ func main() {
 	// }
 
 	fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
-	dbclient.BenchmarkQuery("SELECT uid, data from resources WHERE data->>'status' = 'Running' LIMIT 10", PRINT_RESULTS)
+	dbclient.BenchmarkQuery("SELECT uid, data from resources WHERE data::jsonb->>'status' = 'Running' LIMIT 10", PRINT_RESULTS)
 
 	fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace'")
-	dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from resources", PRINT_RESULTS)
+	dbclient.BenchmarkQuery("SELECT DISTINCT data::jsonb->>'namespace' from resources", PRINT_RESULTS)
 
 	// LESSON: Adding ORDER BY increases execution time by 2x.
 	fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
-	dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' as namespace from resources ORDER BY namespace ASC", PRINT_RESULTS)
+	dbclient.BenchmarkQuery("SELECT DISTINCT data::jsonb->>'namespace' as namespace from resources ORDER BY namespace ASC", PRINT_RESULTS)
 
 	fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
-	dbclient.BenchmarkQuery("SELECT data->>'kind' as kind, count(data->>'kind') as count FROM resources GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
+	dbclient.BenchmarkQuery("SELECT data::jsonb->>'kind' as kind, count(data::jsonb->>'kind') as count FROM resources GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
 
-	fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
+	// fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
 	// benchmarkQuery(database, "SELECT kind, count(*) as count FROM (SELECT json_extract(resources.data, '$.kind') as kind FROM resources) GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
 	// dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT data->>'kind' as kind FROM resources) GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
 
