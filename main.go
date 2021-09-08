@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	TOTAL_CLUSTERS   = 2 // Number of SNO clusters to simulate.
+	TOTAL_CLUSTERS   = 100 // Number of SNO clusters to simulate.
 	PRINT_RESULTS    = true
 	SINGLE_TABLE     = true // Store relationships in single table or separate table.
 	UPDATE_TOTAL     = 1000 // Number of records to update.
@@ -45,8 +45,6 @@ func main() {
 
 				database.Exec(context.Background(), dquery)
 				database.Exec(context.Background(), "COMMIT TRANSACTION")
-
-				dbclient.BenchmarkQuery("SELECT table_name FROM information_schema.tables where table_name like 'cluster%'", PRINT_RESULTS)
 
 				cquery := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT, edgesFrom TEXT)", clusterName)
 				fmt.Println("creating", clusterName)
