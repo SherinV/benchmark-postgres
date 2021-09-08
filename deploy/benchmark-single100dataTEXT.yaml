@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  labels:
+    job-name: benchmark-single100datatext
+  name: benchmark-single100datatext
+  namespace: postgres-operator
+spec:
+  backoffLimit: 6
+  completions: 1
+  parallelism: 1
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        job-name: benchmark-single100datatext
+    spec:
+      containers:
+      - env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: hippo-pguser-hippo
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              key: host
+              name: hippo-pguser-hippo
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              key: user
+              name: hippo-pguser-hippo
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              key: dbname
+              name: hippo-pguser-hippo
+        image: quay.io/sherinv/benchmark-postgres:single100dataTEXT
+        imagePullPolicy: Always
+        name: benchmark
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+      - name: sherinv-pull-secret
+      restartPolicy: Never
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
