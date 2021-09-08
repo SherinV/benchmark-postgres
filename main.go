@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	TOTAL_CLUSTERS = 10 // Number of SNO clusters to simulate.
+	TOTAL_CLUSTERS = 100 // Number of SNO clusters to simulate.
 	PRINT_RESULTS  = true
 	SINGLE_TABLE   = false // Store relationships in single table or separate table.
 	UPDATE_TOTAL   = 1000  // Number of records to update.
@@ -38,7 +38,7 @@ func main() {
 	//var edgeStmt *sql.Stmt
 	if SINGLE_TABLE {
 		database.Exec(context.Background(), "DROP TABLE resources")
-		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT,edgesFrom TEXT)")
+		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, ,edgedgesTo TEXTesFrom TEXT)")
 	} else {
 		for i := 0; i < TOTAL_CLUSTERS; i++ {
 			clusterName := fmt.Sprintf("cluster%d", i)
@@ -525,9 +525,9 @@ func getAllRelationships(uid string) map[string][][]string {
 	var relatedTo map[string][][]string
 	tableName := uid[:strings.Index(uid, "/")]
 	tableNameClean := strings.ReplaceAll(tableName, "-", "")
-
+	uid = tableNameClean + uid[strings.Index(uid, "/"):]
 	dquery := fmt.Sprintf("SELECT edgesTo FROM %s where uid='%s'", tableNameClean, uid)
-
+	fmt.Println(dquery)
 	rows, err := database.Query(context.Background(), dquery)
 
 	if err != nil {
@@ -569,7 +569,7 @@ func getAllConnectedFrom(uid string) map[string][][]string {
 
 	tableName := uid[:strings.Index(uid, "/")]
 	tableNameClean := strings.ReplaceAll(tableName, "-", "")
-
+	uid = tableNameClean + uid[strings.Index(uid, "/"):]
 	dquery := fmt.Sprintf("SELECT edgesFrom FROM %s where uid='%s'", tableNameClean, uid)
 
 	rows, err := database.Query(context.Background(), dquery)
