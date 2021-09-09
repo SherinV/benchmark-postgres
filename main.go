@@ -22,7 +22,7 @@ const (
 	SINGLE_TABLE     = true // Store relationships in single table or separate table.
 	UPDATE_TOTAL     = 1000 // Number of records to update.
 	DELETE_TOTAL     = 1000 // Number of records to delete.
-	CLUSTER_SHARDING = true
+	CLUSTER_SHARDING = false
 )
 
 var lastUID string
@@ -194,19 +194,19 @@ func main() {
 		dbclient.BenchmarkQuery("SELECT data->>'kind' as kind , count(data->>'kind') as count FROM  resources GROUP BY kind ORDER BY count DESC", false)
 
 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
-		dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT json_extract(data, '$.kind') as kind FROM resources) GROUP BY kind ORDER BY count DESC", false)
+		dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT data->>'kind' as kind FROM resources) GROUP BY kind ORDER BY count DESC", false)
 
 		fmt.Println("\nDESCRIPTION: Delete a single record.")
 		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM resources WHERE id='cluster3/29ac6c4a-181c-499f-b059-977d7e9889dd'"), true)
 
 		fmt.Println("\nDESCRIPTION: Delete 1000 records.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM resources WHERE ROWID IN (SELECT ROWID FROM resources ORDER BY RANDOM() limit 1000)"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM resources WHERE ctid IN (SELECT ctid FROM resources ORDER BY RANDOM() limit 1000)"), true)
 
 		fmt.Println("\nDESCRIPTION: Update a single record.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data = json_set(data, '$.kind', 'value was updated') WHERE id like 'cluster99/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data->>'kind' as kind ='value was updated' WHERE id like 'cluster99/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
 
 		fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data = json_set(data, '$.kind', 'value was updated') WHERE ROWID IN (SELECT ROWID FROM resources ORDER BY RANDOM() limit 1000)"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data->>'kind' as kind = 'value was updated' WHERE ctid IN (SELECT ctid FROM resources ORDER BY RANDOM() limit 1000)"), true)
 	}
 
 	PrintMemUsage()
