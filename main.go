@@ -17,12 +17,12 @@ import (
 )
 
 const (
-	TOTAL_CLUSTERS   = 100 // Number of SNO clusters to simulate.
+	TOTAL_CLUSTERS   = 10 // Number of SNO clusters to simulate.
 	PRINT_RESULTS    = true
 	SINGLE_TABLE     = true // Store relationships in single table or separate table.
 	UPDATE_TOTAL     = 1000 // Number of records to update.
 	DELETE_TOTAL     = 1000 // Number of records to delete.
-	CLUSTER_SHARDING = false
+	CLUSTER_SHARDING = true
 )
 
 var lastUID string
@@ -164,11 +164,13 @@ func main() {
 		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM cluster2 WHERE ctid IN (SELECT ctid FROM cluster2 ORDER BY RANDOM() limit 1000)"), true)
 
 		fmt.Println("\nDESCRIPTION: Update a a single record: cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET kind = 'value was updated' WHERE uid = 'cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET data = jsonb_set(data, '{kind}', %s) WHERE uid = 'cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'", "new-value"), true)
 		// dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET data = json_set(data, '$.kind', 'value was updated') WHERE id = 'cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
 
 		fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET kind = 'value was updated' WHERE ctid IN (SELECT ctid FROM cluster5 ORDER BY RANDOM() limit 1000)"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET data = jsonb_set(data, '{kind}', %s) WHERE ctid IN (SELECT ctid FROM cluster5 ORDER BY RANDOM() limit 1000)", "new-value"), true)
+
+		// UPDATE test SET data = jsonb_set(data, '{name}', '"my-other-name"');
 
 	}
 
@@ -203,10 +205,10 @@ func main() {
 		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM resources WHERE ctid IN (SELECT ctid FROM resources ORDER BY RANDOM() limit 1000)"), true)
 
 		fmt.Println("\nDESCRIPTION: Update a single record.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data->>'kind' as kind ='value was updated' WHERE id like 'cluster99/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data= jsonb_set(data, '{kind}', %s) WHERE id like 'cluster99/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'", "new-value"), true)
 
 		fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data->>'kind' as kind = 'value was updated' WHERE ctid IN (SELECT ctid FROM resources ORDER BY RANDOM() limit 1000)"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data= jsonb_set(data, '{kind}', %s) WHERE ctid IN (SELECT ctid FROM resources ORDER BY RANDOM() limit 1000)", "new-value"), true)
 	}
 
 	PrintMemUsage()
