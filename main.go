@@ -42,14 +42,14 @@ func main() {
 			for i := 0; i < TOTAL_CLUSTERS; i++ {
 				clusterName := fmt.Sprintf("cluster%d", i)
 				dquery := fmt.Sprintf("drop table if exists %s cascade; ", clusterName)
-				fmt.Println("Dropping", clusterName)
-				fmt.Println("Dropping", dquery)
+				// fmt.Println("Dropping", clusterName)
+				// fmt.Println("Dropping", dquery)
 
 				database.Exec(context.Background(), dquery)
 				database.Exec(context.Background(), "COMMIT TRANSACTION")
 
 				cquery := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT, edgesFrom TEXT)", clusterName)
-				fmt.Println("creating", clusterName)
+				// fmt.Println("creating", clusterName)
 				_, err := database.Exec(context.Background(), cquery)
 				if err != nil {
 					fmt.Println(err)
@@ -157,17 +157,18 @@ func main() {
 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
 		dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT data->>'kind' as kind FROM resource_view)A GROUP BY kind ORDER BY count DESC", true)
 
-		// fmt.Println("\nDESCRIPTION: Delete a single record.")
-		// dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM cluster3 WHERE uid='cluster3/29ac6c4a-181c-499f-b059-977d7e9889dd'"), true)
+		fmt.Println("\nDESCRIPTION: Delete a single record.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM cluster3 WHERE uid='cluster3/29ac6c4a-181c-499f-b059-977d7e9889dd'"), true)
 
-		// fmt.Println("\nDESCRIPTION: Delete 1000 records.")
-		// dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM cluster2 WHERE ROWID IN (SELECT ROWID FROM cluster2 ORDER BY RANDOM() limit 1000)"), true)
+		fmt.Println("\nDESCRIPTION: Delete 1000 records.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM cluster2 WHERE ctid IN (SELECT ctid FROM cluster2 ORDER BY RANDOM() limit 1000)"), true)
 
-		// fmt.Println("\nDESCRIPTION: Update a a single record: cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'.")
+		fmt.Println("\nDESCRIPTION: Update a a single record: cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET kind = 'value was updated' WHERE uid = 'cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
 		// dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET data = json_set(data, '$.kind', 'value was updated') WHERE id = 'cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
 
-		// fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
-		// dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET data = json_set(data, '$.kind', 'value was updated') WHERE ROWID IN (SELECT ROWID FROM cluster5 ORDER BY RANDOM() limit 1000)"), true)
+		fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET kind = 'value was updated' WHERE ctid IN (SELECT ctid FROM cluster5 ORDER BY RANDOM() limit 1000)"), true)
 
 	}
 
@@ -180,17 +181,17 @@ func main() {
 		dbclient.BenchmarkQuery("SELECT count(*) from resources", true)
 
 		fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
-		dbclient.BenchmarkQuery("SELECT id, data from resources where json_extract(data, \"$.status\") LIKE 'run%' LIMIT 10", false)
+		dbclient.BenchmarkQuery("SELECT id, data from resources where data->> 'status' = 'Running'  LIMIT 10", false)
 
 		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace'")
-		dbclient.BenchmarkQuery("SELECT DISTINCT data, '$.namespace') from resources", false)
+		dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from resources", false)
 
 		// LESSON: Adding ORDER BY increases execution time by 2x.
 		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
-		dbclient.BenchmarkQuery("SELECT DISTINCT json_extract(data, '$.namespace') as namespace from resources ORDER BY namespace ASC", false)
+		dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' as namespace from resources ORDER BY namespace ASC", false)
 
 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
-		dbclient.BenchmarkQuery("SELECT json_extract(data, '$.kind') as kind , count(json_extract(data, '$.kind')) as count FROM resources GROUP BY kind ORDER BY count DESC", false)
+		dbclient.BenchmarkQuery("SELECT data->>'kind' as kind , count(data->>'kind') as count FROM  resources GROUP BY kind ORDER BY count DESC", false)
 
 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
 		dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT json_extract(data, '$.kind') as kind FROM resources) GROUP BY kind ORDER BY count DESC", false)
@@ -408,7 +409,7 @@ func insertEdges(edges []map[string]interface{}, statement *sql.Stmt, clusterNam
 func createView(tableNames string) {
 	// database.Exec(fmt.Sprintf("CREATE VIEW IF NOT EXISTS combined AS SELECT name FROM benchmark.tables"))
 	rows, queryError := database.Query(context.Background(), tableNames)
-	fmt.Println(rows)
+	// fmt.Println(rows)
 	if queryError != nil {
 		fmt.Println("Error executing query: ", queryError)
 	}
