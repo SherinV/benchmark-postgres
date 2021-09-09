@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	pgxpool "github.com/jackc/pgx/v4/pgxpool"
@@ -48,11 +50,10 @@ func main() {
 					fmt.Println(err)
 				}
 			}
-		} else { // this is case where single table but not cluster sharding
+		} else { //  single table but not cluster sharding
 			database.Exec(context.Background(), "DROP TABLE resources")
 			database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT, edgesFrom TEXT))")
 			// nodeStmt, _ = database.Prepare(fmt.Sprintf("INSERT INTO resources (uid, cluster, data, relatedTo) VALUES (?, ?, ?, ?)"))
-
 		}
 	} else {
 		database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, data TEXT)")
@@ -73,7 +74,6 @@ func main() {
 		if CLUSTER_SHARDING {
 			tableName = fmt.Sprintf("cluster%d", i)
 		}
-
 		insert(tableName, addNodes, database, fmt.Sprintf("cluster-%d", i))
 		if !SINGLE_TABLE {
 			insertEdges(addEdges, edgeStmt, fmt.Sprintf("cluster-%d", i))
@@ -86,131 +86,121 @@ func main() {
 	time.Sleep(1 * time.Second)
 
 	fmt.Println("\nInsert took", time.Since(start))
-
 	fmt.Printf("Total clusters: %d \n\n", TOTAL_CLUSTERS)
+
+	if SINGLE_TABLE {
+		if CLUSTER_SHARDING {
+			fmt.Println("DESCRIPTION: Create a view.")
+			createView("SELECT table_name FROM information_schema.tables where table_name like 'cluster%'")
+		}
+	}
 
 	// Benchmark queries
 	fmt.Println("\nBENCHMARK QUERIES")
 
-	if SINGLE_TABLE {
-		if CLUSTER_SHARDING {
+	// if !SINGLE_TABLE && !CLUSTER_SHARDING {
+	// 	fmt.Println("\nDESCRIPTION: Count all relationships")
+	// 	benchmarkQuery(database, "SELECT count(*) FROM relationships", true)
+	// }
 
-			dbclient.BenchmarkQuery("SELECT table_name FROM information_schema.tables where table_name like 'cluster%'", PRINT_RESULTS)
-			dbclient.BenchmarkQuery("SELECT COUNT(*) FROM cluster1", PRINT_RESULTS)
+	// if !SINGLE_TABLE && CLUSTER_SHARDING {
+	// 	fmt.Println("\nDESCRIPTION: Count all relationships")
+	// 	benchmarkQuery(database, "SELECT count(*) FROM relationship_view", true)
 
-			// fmt.Println("DESCRIPTION: Create a view.")
+	// 	fmt.Println("\nDESCRIPTION: Find all relationships for uid =n")
+	// 	benchmarkQuery(database, "SELECT * from relationship_view where sourceId = 'cluster0/0a6467fc-8a79-47cd-aa75-f405c4f02c36'", false)
+	// }
 
-			createView("SELECT table_name FROM information_schema.tables where table_name like 'cluster%'")
+	if SINGLE_TABLE && CLUSTER_SHARDING {
 
-		}
+		fmt.Println("\nDESCRIPTION: Find a record using the UID")
+		dbclient.BenchmarkQuery(fmt.Sprintf("SELECT id, data FROM resource_view WHERE id='%s'", lastUID), true)
+
+		fmt.Println("\nDESCRIPTION: Count all resources")
+		dbclient.BenchmarkQuery("SELECT count(*) from resource_view", true)
+
+		fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
+		dbclient.BenchmarkQuery("SELECT id, data from resource_view where data->> 'status' = 'Running' LIMIT 10", false)
+
+		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' from view")
+		dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace') from resource_view", false)
+
+		//specific cluster known ^
+		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' from cluster1")
+		dbclient.BenchmarkQuery("SELECT DISTINCT json_extract(data, '$.namespace') from cluster1", false)
+
+		// LESSON: Adding ORDER BY increases execution time by 2x.
+		// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
+		// benchmarkQuery(database, "SELECT DISTINCT json_extract(data, '$.namespace') as namespace from resource_view ORDER BY namespace ASC", false)
+
+		// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' (no-sorting)")
+		// benchmarkQuery(database, "SELECT DISTINCT json_extract(data, '$.namespace') as namespace from resource_view", false)
+
+		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' (without order-by)")
+		dbclient.BenchmarkQuery("SELECT json_extract(data, '$.kind') as kind , count(json_extract(data, '$.kind')) as count FROM resource_view GROUP BY kind", false)
+
+		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
+		dbclient.BenchmarkQuery("SELECT json_extract(data, '$.kind') as kind , count(json_extract(data, '$.kind')) as count FROM resource_view GROUP BY kind ORDER BY count DESC", false)
+
+		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
+		dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT json_extract(data, '$.kind') as kind FROM resource_view) GROUP BY kind ORDER BY count DESC", false)
+
+		fmt.Println("\nDESCRIPTION: Delete a single record.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM cluster3 WHERE id='cluster3/29ac6c4a-181c-499f-b059-977d7e9889dd'"), true)
+
+		fmt.Println("\nDESCRIPTION: Delete 1000 records.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM cluster2 WHERE ROWID IN (SELECT ROWID FROM cluster2 ORDER BY RANDOM() limit 1000)"), true)
+
+		fmt.Println("\nDESCRIPTION: Update a a single record: cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET data = json_set(data, '$.kind', 'value was updated') WHERE id = 'cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
+
+		fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET data = json_set(data, '$.kind', 'value was updated') WHERE ROWID IN (SELECT ROWID FROM cluster5 ORDER BY RANDOM() limit 1000)"), true)
+
 	}
 
-	// 	fmt.Println("\nBENCHMARK QUERIES")
+	if SINGLE_TABLE && !CLUSTER_SHARDING {
 
-	// 	if !SINGLE_TABLE && !CLUSTER_SHARDING {
-	// 		fmt.Println("\nDESCRIPTION: Count all relationships")
-	// 		benchmarkQuery(database, "SELECT count(*) FROM relationships", true)
-	// 	}
+		fmt.Println("\nDESCRIPTION: Find a record using the UID")
+		dbclient.BenchmarkQuery(fmt.Sprintf("SELECT id, data FROM resources WHERE id='%s'", lastUID), true)
 
-	// 	if !SINGLE_TABLE && CLUSTER_SHARDING {
-	// 		fmt.Println("\nDESCRIPTION: Count all relationships")
-	// 		benchmarkQuery(database, "SELECT count(*) FROM relationship_view", true)
+		fmt.Println("\nDESCRIPTION: Count all resources")
+		dbclient.BenchmarkQuery("SELECT count(*) from resources", true)
 
-	// 		fmt.Println("\nDESCRIPTION: Find all relationships for uid =n")
-	// 		benchmarkQuery(database, "SELECT * from relationship_view where sourceId = 'cluster0/0a6467fc-8a79-47cd-aa75-f405c4f02c36'", false)
-	// 	}
+		fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
+		dbclient.BenchmarkQuery("SELECT id, data from resources where json_extract(data, \"$.status\") LIKE 'run%' LIMIT 10", false)
 
-	// 	if SINGLE_TABLE && CLUSTER_SHARDING {
+		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace'")
+		dbclient.BenchmarkQuery("SELECT DISTINCT data, '$.namespace') from resources", false)
 
-	// 		fmt.Println("\nDESCRIPTION: Find a record using the UID")
-	// 		benchmarkQuery(database, fmt.Sprintf("SELECT id, data FROM resource_view WHERE id='%s'", lastUID), true)
+		// LESSON: Adding ORDER BY increases execution time by 2x.
+		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
+		dbclient.BenchmarkQuery("SELECT DISTINCT json_extract(data, '$.namespace') as namespace from resources ORDER BY namespace ASC", false)
 
-	// 		fmt.Println("\nDESCRIPTION: Count all resources")
-	// 		benchmarkQuery(database, "SELECT count(*) from resource_view", true)
+		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
+		dbclient.BenchmarkQuery("SELECT json_extract(data, '$.kind') as kind , count(json_extract(data, '$.kind')) as count FROM resources GROUP BY kind ORDER BY count DESC", false)
 
-	// 		fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
-	// 		benchmarkQuery(database, "SELECT id, data from resource_view where data->> 'status' = 'Running' LIMIT 10", false)
+		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
+		dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT json_extract(data, '$.kind') as kind FROM resources) GROUP BY kind ORDER BY count DESC", false)
 
-	// 		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' from view")
-	// 		benchmarkQuery(database, "SELECT DISTINCT data->>'namespace') from resource_view", false)
+		fmt.Println("\nDESCRIPTION: Delete a single record.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM resources WHERE id='cluster3/29ac6c4a-181c-499f-b059-977d7e9889dd'"), true)
 
-	// 		//specific cluster known ^
-	// 		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' from cluster1")
-	// 		benchmarkQuery(database, "SELECT DISTINCT json_extract(data, '$.namespace') from cluster1", false)
+		fmt.Println("\nDESCRIPTION: Delete 1000 records.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM resources WHERE ROWID IN (SELECT ROWID FROM resources ORDER BY RANDOM() limit 1000)"), true)
 
-	// 		// LESSON: Adding ORDER BY increases execution time by 2x.
-	// 		// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
-	// 		// benchmarkQuery(database, "SELECT DISTINCT json_extract(data, '$.namespace') as namespace from resource_view ORDER BY namespace ASC", false)
+		fmt.Println("\nDESCRIPTION: Update a single record.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data = json_set(data, '$.kind', 'value was updated') WHERE id like 'cluster99/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
 
-	// 		// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' (no-sorting)")
-	// 		// benchmarkQuery(database, "SELECT DISTINCT json_extract(data, '$.namespace') as namespace from resource_view", false)
+		fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
+		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data = json_set(data, '$.kind', 'value was updated') WHERE ROWID IN (SELECT ROWID FROM resources ORDER BY RANDOM() limit 1000)"), true)
+	}
 
-	// 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' (without order-by)")
-	// 		benchmarkQuery(database, "SELECT json_extract(data, '$.kind') as kind , count(json_extract(data, '$.kind')) as count FROM resource_view GROUP BY kind", false)
-
-	// 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
-	// 		benchmarkQuery(database, "SELECT json_extract(data, '$.kind') as kind , count(json_extract(data, '$.kind')) as count FROM resource_view GROUP BY kind ORDER BY count DESC", false)
-
-	// 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
-	// 		benchmarkQuery(database, "SELECT kind, count(*) as count FROM (SELECT json_extract(data, '$.kind') as kind FROM resource_view) GROUP BY kind ORDER BY count DESC", false)
-
-	// 		fmt.Println("\nDESCRIPTION: Delete a single record.")
-	// 		benchmarkQuery(database, fmt.Sprintf("DELETE FROM cluster3 WHERE id='cluster3/29ac6c4a-181c-499f-b059-977d7e9889dd'"), true)
-
-	// 		fmt.Println("\nDESCRIPTION: Delete 1000 records.")
-	// 		benchmarkQuery(database, fmt.Sprintf("DELETE FROM cluster2 WHERE ROWID IN (SELECT ROWID FROM cluster2 ORDER BY RANDOM() limit 1000)"), true)
-
-	// 		fmt.Println("\nDESCRIPTION: Update a a single record: cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'.")
-	// 		benchmarkQuery(database, fmt.Sprintf("UPDATE cluster5 SET data = json_set(data, '$.kind', 'value was updated') WHERE id = 'cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
-
-	// 		fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
-	// 		benchmarkQuery(database, fmt.Sprintf("UPDATE cluster5 SET data = json_set(data, '$.kind', 'value was updated') WHERE ROWID IN (SELECT ROWID FROM cluster5 ORDER BY RANDOM() limit 1000)"), true)
-
-	// 	}
-
-	// 	if SINGLE_TABLE && !CLUSTER_SHARDING {
-
-	// 		fmt.Println("\nDESCRIPTION: Find a record using the UID")
-	// 		benchmarkQuery(database, fmt.Sprintf("SELECT id, data FROM resources WHERE id='%s'", lastUID), true)
-
-	// 		fmt.Println("\nDESCRIPTION: Count all resources")
-	// 		benchmarkQuery(database, "SELECT count(*) from resources", true)
-
-	// 		fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
-	// 		benchmarkQuery(database, "SELECT id, data from resources where json_extract(data, \"$.status\") LIKE 'run%' LIMIT 10", false)
-
-	// 		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace'")
-	// 		benchmarkQuery(database, "SELECT DISTINCT data, '$.namespace') from resources", false)
-
-	// 		// LESSON: Adding ORDER BY increases execution time by 2x.
-	// 		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
-	// 		benchmarkQuery(database, "SELECT DISTINCT json_extract(data, '$.namespace') as namespace from resources ORDER BY namespace ASC", false)
-
-	// 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
-	// 		benchmarkQuery(database, "SELECT json_extract(data, '$.kind') as kind , count(json_extract(data, '$.kind')) as count FROM resources GROUP BY kind ORDER BY count DESC", false)
-
-	// 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
-	// 		benchmarkQuery(database, "SELECT kind, count(*) as count FROM (SELECT json_extract(data, '$.kind') as kind FROM resources) GROUP BY kind ORDER BY count DESC", false)
-
-	// 		fmt.Println("\nDESCRIPTION: Delete a single record.")
-	// 		benchmarkQuery(database, fmt.Sprintf("DELETE FROM resources WHERE id='cluster3/29ac6c4a-181c-499f-b059-977d7e9889dd'"), true)
-
-	// 		fmt.Println("\nDESCRIPTION: Delete 1000 records.")
-	// 		benchmarkQuery(database, fmt.Sprintf("DELETE FROM resources WHERE ROWID IN (SELECT ROWID FROM resources ORDER BY RANDOM() limit 1000)"), true)
-
-	// 		fmt.Println("\nDESCRIPTION: Update a single record.")
-	// 		benchmarkQuery(database, fmt.Sprintf("UPDATE resources SET data = json_set(data, '$.kind', 'value was updated') WHERE id like 'cluster99/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
-
-	// 		fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
-	// 		benchmarkQuery(database, fmt.Sprintf("UPDATE resources SET data = json_set(data, '$.kind', 'value was updated') WHERE ROWID IN (SELECT ROWID FROM resources ORDER BY RANDOM() limit 1000)"), true)
-	// 	}
-
-	// 	PrintMemUsage()
-	// 	fmt.Println("\nWon't exit so I can get memory usage from OS.")
-	// 	wg := sync.WaitGroup{}
-	// 	wg.Add(1)
-	// 	wg.Wait()
-	// }
+	PrintMemUsage()
+	fmt.Println("\nWon't exit so I can get memory usage from OS.")
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	wg.Wait()
 
 	// fmt.Println("\nDESCRIPTION: Find a record using the UID")
 	// dbclient.BenchmarkQuery(fmt.Sprintf("SELECT uid, data FROM resources WHERE uid='%s'", lastUID), true)
@@ -257,6 +247,7 @@ func main() {
 	// benchmarkDelete(database, DELETE_TOTAL)
 
 	fmt.Println("DONE exiting.")
+
 }
 
 /*****************************
@@ -405,6 +396,7 @@ func insertEdges(edges []map[string]interface{}, statement *sql.Stmt, clusterNam
 func createView(names string) {
 	// database.Exec(fmt.Sprintf("CREATE VIEW IF NOT EXISTS combined AS SELECT name FROM benchmark.tables"))
 	rows, queryError := database.Query(context.Background(), names)
+
 	fmt.Println(rows)
 	if queryError != nil {
 		fmt.Println("Error executing query: ", queryError)
@@ -524,4 +516,18 @@ func getEnvOrUseDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func PrintMemUsage() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
+	fmt.Println("\nMEMORY USAGE:")
+	fmt.Printf("\tAlloc = %v MiB", bToMb(m.Alloc))
+	fmt.Printf("\n\tTotalAlloc = %v MiB", bToMb(m.TotalAlloc))
+	fmt.Printf("\n\tSys = %v MiB", bToMb(m.Sys))
+	fmt.Printf("\n\tNumGC = %v\n\n", m.NumGC)
+}
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
 }
