@@ -40,8 +40,8 @@ func createPool() {
 	DB_HOST := getEnvOrUseDefault("DB_HOST", "localhost")
 	DB_USER := getEnvOrUseDefault("DB_USER", "hippo")
 	DB_NAME := getEnvOrUseDefault("DB_NAME", "hippo")
-	DB_PASSWORD := url.QueryEscape(getEnvOrUseDefault("DB_PASSWORD", ""))
-	DB_PORT, err := strconv.Atoi(getEnvOrUseDefault("DB_PORT", "5432"))
+	DB_PASSWORD := url.QueryEscape(getEnvOrUseDefault("DB_PASSWORD", "1jUsx;W<u)9*hSbbrqlgmfg^"))
+	DB_PORT, err := strconv.Atoi(getEnvOrUseDefault("DB_PORT", "50745"))
 	if err != nil {
 		DB_PORT = 5432
 		fmt.Println("Error parsing db port, using default 5432")

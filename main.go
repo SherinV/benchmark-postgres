@@ -17,12 +17,12 @@ import (
 )
 
 const (
-	TOTAL_CLUSTERS   = 10 // Number of SNO clusters to simulate.
+	TOTAL_CLUSTERS   = 100 // Number of SNO clusters to simulate.
 	PRINT_RESULTS    = true
 	SINGLE_TABLE     = true // Store relationships in single table or separate table.
 	UPDATE_TOTAL     = 1000 // Number of records to update.
 	DELETE_TOTAL     = 1000 // Number of records to delete.
-	CLUSTER_SHARDING = true
+	CLUSTER_SHARDING = false
 )
 
 var lastUID string
@@ -42,14 +42,12 @@ func main() {
 			for i := 0; i < TOTAL_CLUSTERS; i++ {
 				clusterName := fmt.Sprintf("cluster%d", i)
 				dquery := fmt.Sprintf("drop table if exists %s cascade; ", clusterName)
-				// fmt.Println("Dropping", clusterName)
-				// fmt.Println("Dropping", dquery)
 
 				database.Exec(context.Background(), dquery)
 				database.Exec(context.Background(), "COMMIT TRANSACTION")
 
 				cquery := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT, edgesFrom TEXT)", clusterName)
-				// fmt.Println("creating", clusterName)
+
 				_, err := database.Exec(context.Background(), cquery)
 				if err != nil {
 					fmt.Println(err)
@@ -57,7 +55,9 @@ func main() {
 			}
 		} else { //  single table but not cluster sharding
 			database.Exec(context.Background(), "DROP TABLE resources")
+			fmt.Println("finished dropping leftover table")
 			database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT, edgesFrom TEXT))")
+			fmt.Println("finished creating table")
 			// nodeStmt, _ = database.Prepare(fmt.Sprintf("INSERT INTO resources (uid, cluster, data, relatedTo) VALUES (?, ?, ?, ?)"))
 		}
 	} else {
@@ -75,13 +75,16 @@ func main() {
 
 	// LESSON: When using BEGIN and COMMIT TRANSACTION saving to a file is comparable to in memory.
 	for i := 0; i < TOTAL_CLUSTERS; i++ {
-		tableName := "resources"
-		if CLUSTER_SHARDING {
-			tableName = fmt.Sprintf("cluster%d", i)
-		}
 
-		insert(tableName, addNodes, database, fmt.Sprintf("cluster%d", i))
-		fmt.Sprintln("Inserting ", tableName)
+		if CLUSTER_SHARDING {
+			tableName := fmt.Sprintf("cluster%d", i)
+			insert(tableName, addNodes, database, fmt.Sprintf("cluster%d", i))
+		} else {
+			tableName := "resources"
+			insert(tableName, addNodes, database, fmt.Sprintf("cluster%d", i))
+
+		}
+		// fmt.Sprintln("Inserting ", tableName)
 		if !SINGLE_TABLE {
 			insertEdges(addEdges, edgeStmt, fmt.Sprintf("cluster%d", i))
 		}
@@ -137,16 +140,9 @@ func main() {
 		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' from view")
 		dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from resource_view", true)
 
-		//specific cluster known ^
-		// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' from cluster1")
-		// dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from cluster1", false)
-
 		// LESSON: Adding ORDER BY increases execution time by 2x.
 		fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
 		dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' as namespace from resource_view ORDER BY namespace ASC", true)
-
-		// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' (no-sorting)")
-		// benchmarkQuery(database, "SELECT DISTINCT json_extract(data, '$.namespace') as namespace from resource_view", false)
 
 		fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' (without order-by)")
 		dbclient.BenchmarkQuery("SELECT data->>'kind' as kind , count(data->>'kind') as count FROM resource_view GROUP BY kind", true)
@@ -164,17 +160,18 @@ func main() {
 		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM cluster2 WHERE ctid IN (SELECT ctid FROM cluster2 ORDER BY RANDOM() limit 1000)"), true)
 
 		fmt.Println("\nDESCRIPTION: Update a a single record: cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET data = jsonb_set(data, '{kind}', %s) WHERE uid = 'cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'", "new-value"), true)
-		// dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET data = json_set(data, '$.kind', 'value was updated') WHERE id = 'cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf(`UPDATE cluster5 SET data = jsonb_set(data, '{kind}', '"%s"') WHERE uid = 'cluster5/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'`, "new value updated"), true)
 
 		fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE cluster5 SET data = jsonb_set(data, '{kind}', %s) WHERE ctid IN (SELECT ctid FROM cluster5 ORDER BY RANDOM() limit 1000)", "new-value"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf(`UPDATE cluster5 SET data = jsonb_set(data, '{kind}', '"%s"') WHERE ctid IN (SELECT ctid FROM cluster5 ORDER BY RANDOM() limit 1000)`, "new value updated"), true)
 
 		// UPDATE test SET data = jsonb_set(data, '{name}', '"my-other-name"');
 
 	}
 
 	if SINGLE_TABLE && !CLUSTER_SHARDING {
+
+		dbclient.BenchmarkQuery("SELECT table_name FROM information_schema.tables where table_name like 'resources'", PRINT_RESULTS)
 
 		fmt.Println("\nDESCRIPTION: Find a record using the UID")
 		dbclient.BenchmarkQuery(fmt.Sprintf("SELECT id, data FROM resources WHERE id='%s'", lastUID), true)
@@ -205,10 +202,10 @@ func main() {
 		dbclient.BenchmarkQuery(fmt.Sprintf("DELETE FROM resources WHERE ctid IN (SELECT ctid FROM resources ORDER BY RANDOM() limit 1000)"), true)
 
 		fmt.Println("\nDESCRIPTION: Update a single record.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data= jsonb_set(data, '{kind}', %s) WHERE id like 'cluster99/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'", "new-value"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf(`UPDATE resources SET data= jsonb_set(data, '{kind}', '"%s"') WHERE id like 'cluster99/0c2ec6f3-fa4d-436e-803a-c3e1c1c4bce0'`, "new-value"), true)
 
 		fmt.Println("\nDESCRIPTION: UPDATE 1000 records.")
-		dbclient.BenchmarkQuery(fmt.Sprintf("UPDATE resources SET data= jsonb_set(data, '{kind}', %s) WHERE ctid IN (SELECT ctid FROM resources ORDER BY RANDOM() limit 1000)", "new-value"), true)
+		dbclient.BenchmarkQuery(fmt.Sprintf(`UPDATE resources SET data= jsonb_set(data, '{kind}', '"%s"') WHERE ctid IN (SELECT ctid FROM resources ORDER BY RANDOM() limit 1000)`, "new-value"), true)
 	}
 
 	PrintMemUsage()
@@ -216,50 +213,6 @@ func main() {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	wg.Wait()
-
-	// fmt.Println("\nDESCRIPTION: Find a record using the UID")
-	// dbclient.BenchmarkQuery(fmt.Sprintf("SELECT uid, data FROM resources WHERE uid='%s'", lastUID), true)
-
-	// fmt.Println("\nDESCRIPTION: Count all resources")
-	// dbclient.BenchmarkQuery("SELECT count(*) from resources", true)
-
-	// // if !SINGLE_TABLE {
-	// // 	fmt.Println("\nDESCRIPTION: Count all relationships")
-	// // 	benchmarkQuery(database, "SELECT count(*) FROM relationships", true)
-	// // }
-
-	// fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
-	// dbclient.BenchmarkQuery("SELECT uid, data from resources WHERE data->>'status' = 'Running' LIMIT 10", PRINT_RESULTS)
-
-	// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace'")
-	// dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from resources", PRINT_RESULTS)
-
-	// // LESSON: Adding ORDER BY increases execution time by 2x.
-	// fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
-	// dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' as namespace from resources ORDER BY namespace ASC", PRINT_RESULTS)
-
-	// fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
-	// dbclient.BenchmarkQuery("SELECT data->>'kind' as kind, count(data->>'kind') as count FROM resources GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
-
-	// fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
-	// benchmarkQuery(database, "SELECT kind, count(*) as count FROM (SELECT json_extract(resources.data, '$.kind') as kind FROM resources) GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
-	// dbclient.BenchmarkQuery("SELECT kind, count(*) as count FROM (SELECT data->>'kind' as kind FROM resources) GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
-
-	// fmt.Println("\nDESCRIPTION: Update a single record.")
-	// benchmarkQuery(database, fmt.Sprintf("UPDATE resources SET data = json_set(data, '$.kind', 'value was updated') WHERE uid='%s'", lastUID), true)
-	// // Print record to verify it was modified.
-	// // benchmarkQuery(database, fmt.Sprintf("SELECT uid, data FROM resources WHERE uid='%s'", lastUID), true)
-
-	// fmt.Printf("DESCRIPTION: Update %d records in the database.\n", UPDATE_TOTAL)
-	// benchmarkUpdate(database, UPDATE_TOTAL)
-
-	// fmt.Println("\nDESCRIPTION: Delete a single record.")
-	// benchmarkQuery(database, fmt.Sprintf("DELETE FROM resources WHERE uid='%s'", lastUID), true)
-	// // Print record to verify it was deleted.
-	// // benchmarkQuery(database, fmt.Sprintf("SELECT uid, data FROM resources WHERE uid='%s'", lastUID), true)
-
-	// fmt.Printf("DESCRIPTION: Delete %d records from the database.\n", DELETE_TOTAL)
-	// benchmarkDelete(database, DELETE_TOTAL)
 
 	fmt.Println("DONE exiting.")
 
@@ -355,7 +308,7 @@ func readTemplate() ([]map[string]interface{}, []map[string]interface{}) {
  */
 func insert(tableName string, records []map[string]interface{}, db *pgxpool.Pool, clusterName string) {
 	fmt.Print(".")
-
+	fmt.Println(tableName)
 	for _, record := range records {
 		lastUID = strings.Replace(record["uid"].(string), "local-cluster", clusterName, 1)
 		// var err error
