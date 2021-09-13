@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	TOTAL_CLUSTERS   = 100 // Number of SNO clusters to simulate.
+	TOTAL_CLUSTERS   = 200 // Number of SNO clusters to simulate.
 	PRINT_RESULTS    = true
 	SINGLE_TABLE     = true // Store relationships in single table or separate table.
 	UPDATE_TOTAL     = 1000 // Number of records to update.
