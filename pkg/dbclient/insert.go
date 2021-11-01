@@ -25,7 +25,7 @@ func batchInsert(instance string) {
 				panic(fmt.Sprintf("Error Marshaling json. %v %v", err, json))
 			}
 			if Single_table {
-				batch.Queue("INSERT into resources values($1,$2,$3,$4,$5)", record.UID, record.Cluster, string(json), record.EdgesTo, record.EdgesFrom)
+				batch.Queue("INSERT into search.resources values($1,$2,$3,$4,$5)", record.UID, record.Cluster, string(json), record.EdgesTo, record.EdgesFrom)
 			} else {
 				iquery := fmt.Sprintf("INSERT into %s values($1,$2,$3,$4,$5)", record.Cluster)
 
