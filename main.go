@@ -30,62 +30,12 @@ var database *pgxpool.Pool
 
 func main() {
 	dbclient.Single_table = SINGLE_TABLE
-	fmt.Printf("Loading %d clusters from template data.\n\n", TOTAL_CLUSTERS)
+	//fmt.Printf("Loading %d clusters from template data.\n\n", TOTAL_CLUSTERS)
 
 	// Open the PostgreSQL database.
 	database = dbclient.GetConnection()
 
-	// Initialize the database tables.
-	//var edgeStmt *sql.Stmt
-	if SINGLE_TABLE {
-		// database.Exec(context.Background(), "CREATE SCHEMA search;")
-		// database.Exec(context.Background(), "SET search_path TO search,public;")
-		// database.Exec(context.Background(), "DROP TABLE search.resources")
-		// database.Exec(context.Background(), "CREATE TABLE IF NOT EXISTS search.resources (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT,edgesFrom TEXT)")
-	} else {
-		for i := 0; i < TOTAL_CLUSTERS; i++ {
-			clusterName := fmt.Sprintf("cluster%d", i)
-
-			dquery := fmt.Sprintf("DROP TABLE  %s", clusterName)
-
-			cquery := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (uid TEXT PRIMARY KEY, cluster TEXT, data JSONB, edgesTo TEXT,edgesFrom TEXT)", clusterName)
-			fmt.Println("creating", clusterName)
-			database.Exec(context.Background(), dquery)
-
-			_, err := database.Exec(context.Background(), cquery)
-			if err != nil {
-				fmt.Println(err)
-			}
-
-		}
-
-		// nodeStmt, _ = database.Prepare("INSERT INTO resources (uid, data) VALUES ($1, $2)")
-		// edgeStmt, _ = database.Prepare("INSERT INTO relationships (sourceId, destId) VALUES ($1, $2)")
-	}
-
-	// Load data from file and unmarshall JSON only once.
-	// addNodes, _ := readTemplate()
-
-	// // Start counting here to exclude time it takes to read file and unmarshall json
-	// start := time.Now()
-
-	// // LESSON: When using BEGIN and COMMIT TRANSACTION saving to a file is comparable to in memory.
-	// for i := 0; i < TOTAL_CLUSTERS; i++ {
-	// 	// database.Exec("BEGIN TRANSACTION")
-	// 	insert(addNodes, database, fmt.Sprintf("cluster%d", i))
-	// 	//if !SINGLE_TABLE {
-	// 	//	insertEdges(addEdges, edgeStmt, fmt.Sprintf("cluster-%d", i))
-	// 	//}
-	// 	// database.Exec("COMMIT TRANSACTION")
-	// }
-
-	// // WORKAROUND to flush the insert channel.
-	// close(dbclient.InsertChan)
-	// time.Sleep(1 * time.Second)
-
-	// fmt.Println("\nInsert took", time.Since(start))
-
-	savedQueries := []string{"SELECT uid from search.resources where data->>'kind' IN ('Daemonset', 'Deployment','Job', 'Statefulset', 'ReplicaSet') LIMIT 10 ", "SELECT uid from search.resources where data->>'kind' IN ('Daemonset', 'Deployment','Job', 'Statefulset', 'ReplicaSet')  "}
+	savedQueries := []string{"SELECT uid from  resources where data->>'kind' IN ('Daemonset', 'Deployment','Job', 'Statefulset', 'ReplicaSet') LIMIT 10 ", "SELECT uid from  resources where data->>'kind' IN ('Daemonset', 'Deployment','Job', 'Statefulset', 'ReplicaSet')  "}
 
 	relTestDescriptions := []string{"Related counts for EndpointSlice uid ", "Related counts for Connected Pod uid ", "Related counts for standalone Pod uid", "Related counts for 2 pods", "Related counts for Node uid", "Saved searches: 10 Workloads", "Saved searches: All Workloads"}
 	relTestUIDs := [][]string{[]string{"cluster0/700fd168-5431-4018-91cd-49bc43fe2f83"},
@@ -109,10 +59,10 @@ func main() {
 	fmt.Println("\nBENCHMARK QUERIES")
 
 	fmt.Println("\nDESCRIPTION: Find a record using the UID")
-	dbclient.BenchmarkQuery(fmt.Sprintf("SELECT uid, data FROM search.resources WHERE uid='%s'", lastUID), true)
+	dbclient.BenchmarkQuery(fmt.Sprintf("SELECT uid, data FROM  resources WHERE uid='%s'", lastUID), true)
 
 	fmt.Println("\nDESCRIPTION: Count all resources")
-	dbclient.BenchmarkQuery("SELECT count(*) from search.resources", true)
+	dbclient.BenchmarkQuery("SELECT count(*) from  resources", true)
 
 	// if !SINGLE_TABLE {
 	// 	fmt.Println("\nDESCRIPTION: Count all relationships")
@@ -120,17 +70,17 @@ func main() {
 	// }
 
 	fmt.Println("\nDESCRIPTION: Find records with a status name containing `Run`")
-	dbclient.BenchmarkQuery("SELECT uid, data from search.resources WHERE data->>'status' = 'Running' LIMIT 10", PRINT_RESULTS)
+	dbclient.BenchmarkQuery("SELECT uid, data from  resources WHERE data->>'status' = 'Running' LIMIT 10", PRINT_RESULTS)
 
 	fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace'")
-	dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from search.resources", PRINT_RESULTS)
+	dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' from  resources", PRINT_RESULTS)
 
 	// LESSON: Adding ORDER BY increases execution time by 2x.
 	fmt.Println("\nDESCRIPTION: Find all the values for the field 'namespace' and sort in ascending order")
-	dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' as namespace from search.resources ORDER BY namespace ASC", PRINT_RESULTS)
+	dbclient.BenchmarkQuery("SELECT DISTINCT data->>'namespace' as namespace from  resources ORDER BY namespace ASC", PRINT_RESULTS)
 
 	fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind'")
-	dbclient.BenchmarkQuery("SELECT data->>'kind' as kind, count(data->>'kind') as count FROM search.resources GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
+	dbclient.BenchmarkQuery("SELECT data->>'kind' as kind, count(data->>'kind') as count FROM  resources GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
 
 	fmt.Println("\nDESCRIPTION: Find count of all values for the field 'kind' using subquery")
 	// benchmarkQuery(database, "SELECT kind, count(*) as count FROM (SELECT json_extract(resources.data, '$.kind') as kind FROM resources) GROUP BY kind ORDER BY count DESC", PRINT_RESULTS)
@@ -334,7 +284,7 @@ func insertEdges(edges []map[string]interface{}, statement *sql.Stmt, clusterNam
  * Helper method to select records for Update and Delete.
  */
 func selectRandomRecords(database *sql.DB, total int) []string {
-	records, err := database.Query("SELECT uid FROM search.resources ORDER BY RANDOM() LIMIT $1", total)
+	records, err := database.Query("SELECT uid FROM  resources ORDER BY RANDOM() LIMIT $1", total)
 	if err != nil {
 		fmt.Println("Error getting random uids. ", err)
 	}
@@ -357,14 +307,14 @@ func benchmarkUpdate(database *sql.DB, updateTotal int) {
 
 	// Now that we have the UIDs we want to update, start benchmarking from here.
 	start := time.Now()
-	updateStmt, _ := database.Prepare("UPDATE search.resources SET data = json_set(data, '$.kind', 'Updated value') WHERE id = $1")
+	updateStmt, _ := database.Prepare("UPDATE  resources SET data = json_set(data, '$.kind', 'Updated value') WHERE id = $1")
 	defer updateStmt.Close()
 	// Lesson: Using BEGIN/COMMIT TRANSACTION doesn't seem to affect performance.
 	for _, uid := range uids {
 		updateStmt.Exec(uid)
 	}
 
-	fmt.Printf("QUERY      : UPDATE search.resources SET data = json_set(data, '$.kind', 'Updated value') WHERE id = $1 \n")
+	fmt.Printf("QUERY      : UPDATE  resources SET data = json_set(data, '$.kind', 'Updated value') WHERE id = $1 \n")
 	fmt.Printf("TIME       : %v \n\n", time.Since(start))
 }
 
@@ -377,11 +327,11 @@ func benchmarkDelete(database *sql.DB, deleteTotal int) {
 
 	// Now that we have the UIDs we want to delete, start benchmarking from here.
 	start := time.Now()
-	_, err := database.Exec("DELETE from search.resources WHERE uid IN ($1)", strings.Join(uids, ", "))
+	_, err := database.Exec("DELETE from  resources WHERE uid IN ($1)", strings.Join(uids, ", "))
 	if err != nil {
 		fmt.Println("error: ", err)
 	}
-	fmt.Printf("QUERY      : DELETE from search.resources WHERE uid IN ($1) \n") //, strings.Join(uids, ", "))
+	fmt.Printf("QUERY      : DELETE from  resources WHERE uid IN ($1) \n") //, strings.Join(uids, ", "))
 	fmt.Printf("TIME       : %v \n\n", time.Since(start))
 }
 
@@ -401,7 +351,7 @@ func benchmarkRelationships(desc string, uids []string) {
 	value := func(uid string, relName string, depth int, sg *sync.WaitGroup) {
 		start := time.Now()
 		defer sg.Done()
-		fmt.Println(uid, relName, depth)
+		//fmt.Println(uid, relName, depth)
 		_, _, row := searchRelationsWithUID(uid, relName, depth)
 		for k, v := range row {
 			mapLock.RLock()
@@ -554,12 +504,12 @@ func searchRelationsWithUID(uid string, relName string, depth int) (int, int, ma
 
 // A function to get the relatedTo filed as a map Given the id , in resources table
 func getAllRelationships(uid string) map[string][][]string {
-	var relatedTo map[string][][]string
+	relatedTo := make(map[string][][]string)
 	tableName := uid[:strings.Index(uid, "/")]
 	tableNameClean := strings.ReplaceAll(tableName, "-", "")
 	uid = tableNameClean + uid[strings.Index(uid, "/"):]
 	// dquery := fmt.Sprintf("SELECT edgesTo FROM %s where uid='%s'", tableNameClean, uid)
-	dquery := fmt.Sprintf("SELECT edgesTo FROM search.resources where uid='%s'", uid)
+	dquery := fmt.Sprintf("SELECT destid,destkind,edgetype FROM  edges where sourceid='%s' and cluster='%s'", uid, tableName)
 
 	// fmt.Println(dquery)
 	rows, err := database.Query(context.Background(), dquery)
@@ -567,23 +517,38 @@ func getAllRelationships(uid string) map[string][][]string {
 	if err != nil {
 		fmt.Println(err)
 	}
-	var relatedTo2 string
+	var relatedUID string
+	var relatedKind string
+	var edgeType string
 
 	for rows.Next() {
-		rows.Scan(&relatedTo2)
+		rows.Scan(&relatedUID, &relatedKind, &edgeType)
+		if _, ok := relatedTo[edgeType]; ok {
+			temp := []string{}
+			temp = append(temp, relatedUID)
+			temp = append(temp, relatedKind)
+			relatedTo[edgeType] = append(relatedTo[edgeType], temp)
+		} else {
+			iStr := make([][]string, 0)
+			temp := []string{}
+			temp = append(temp, relatedUID)
+			temp = append(temp, relatedKind)
+			relatedTo[edgeType] = append(iStr, temp)
+		}
 	}
+
 	// fmt.Println("relatedTo2", relatedTo2)
 	//fmt.Println(relatedTo2)
 	rows.Close()
-	if err := json.Unmarshal([]byte(relatedTo2), &relatedTo); err != nil {
-		fmt.Println(err)
-	}
-	// fmt.Println(uid, "==>", relatedTo)
+	//if err := json.Unmarshal([]byte(relatedTo2), &relatedTo); err != nil {
+	//	fmt.Println(err)
+	//}
+	//fmt.Println(uid, "==>", relatedTo)
 	return relatedTo
 }
 
 func generateAllRelationships() {
-	rows, _ := database.Query(context.Background(), "SELECT uid FROM search.resources")
+	rows, _ := database.Query(context.Background(), "SELECT uid FROM  resources")
 	var uids []string
 	var uid string
 
@@ -599,14 +564,13 @@ func generateAllRelationships() {
 
 }
 func getAllConnectedFrom(uid string) map[string][][]string {
-	var relatedTo map[string][][]string
+	relatedTo := make(map[string][][]string)
 	tableName := uid[:strings.Index(uid, "/")]
 	tableNameClean := strings.ReplaceAll(tableName, "-", "")
 
 	uid = tableNameClean + uid[strings.Index(uid, "/"):]
 	// dquery := fmt.Sprintf("SELECT edgesFrom FROM %s where uid='%s'", tableNameClean, uid)
-	dquery := fmt.Sprintf("SELECT edgesFrom FROM search.resources where uid='%s'", uid)
-	// fmt.Println("getAllConnectedFrom dquery: ", dquery)
+	dquery := fmt.Sprintf("SELECT sourceid,sourcekind,edgetype FROM  edges where destid='%s' ", uid)
 
 	rows, err := database.Query(context.Background(), dquery)
 
@@ -615,16 +579,29 @@ func getAllConnectedFrom(uid string) map[string][][]string {
 	if err != nil {
 		fmt.Println(err)
 	}
-	var relatedTo2 string
+	var relatedUID string
+	var relatedKind string
+	var edgeType string
 
 	for rows.Next() {
-		rows.Scan(&relatedTo2)
+		rows.Scan(&relatedUID, &relatedKind, &edgeType)
+		//fmt.Println("getAllConnectedFrom dquery: ", relatedUID, relatedKind, edgeType)
+		if _, ok := relatedTo[edgeType]; ok {
+			temp := []string{}
+			temp = append(temp, relatedUID)
+			temp = append(temp, relatedKind)
+			relatedTo[edgeType] = append(relatedTo[edgeType], temp)
+		} else {
+			iStr := make([][]string, 0)
+			temp := []string{}
+			temp = append(temp, relatedUID)
+			temp = append(temp, relatedKind)
+			relatedTo[edgeType] = append(iStr, temp)
+		}
 	}
+
 	rows.Close()
-	if err := json.Unmarshal([]byte(relatedTo2), &relatedTo); err != nil {
-		fmt.Println(err)
-	}
-	// fmt.Println(uid, "<==", relatedTo)
+	//fmt.Println(uid, "<==", relatedTo)
 	return relatedTo
 }
 
@@ -633,7 +610,7 @@ func selectRandomRecordsV2(total int, query string) []string {
 	var records pgx.Rows
 
 	if query == "" {
-		records, _ = database.Query(context.Background(), "SELECT uid FROM search.resources ORDER BY RANDOM() LIMIT $1", total)
+		records, _ = database.Query(context.Background(), "SELECT uid FROM  resources ORDER BY RANDOM() LIMIT $1", total)
 		uids = make([]string, total)
 	} else {
 		records, _ = database.Query(context.Background(), query)

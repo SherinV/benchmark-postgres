@@ -15,8 +15,10 @@ spec:
       labels:
         job-name: benchmark
     spec:
+      imagePullSecrets:
+      - name: xrajesh-pullsecret
       containers:
-      - image: quay.io/jlpadilla/benchmark-postgres:latest
+      - image: quay.io/xrajesh/benchmark-postgres:0.1 
         imagePullPolicy: Always
         name: benchmark
         resources: {}
